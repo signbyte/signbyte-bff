@@ -163,7 +163,8 @@ func (r *router) listSigningTasks(ctx *azugo.Context) {
 	ctx.JSON(out)
 }
 
-// getEnvelope returns the composed envelope view: the envelope service's header,
+// getEnvelope returns the composed envelope view: the envelope service's header
+// (including the origin — the system that prepared the envelope — when there is one),
 // slots, and documents, with each slot that has a backing signing job enriched
 // with that job's live signing state. A slot whose live state cannot be read is
 // left without it rather than failing the whole view.
@@ -208,9 +209,14 @@ func (r *router) getEnvelope(ctx *azugo.Context) {
 		slots[i].You = (s.IdentityRef != "" && s.IdentityRef == viewerSerial) ||
 			(s.IdentityRef == "" && detail.Envelope.Owner == obo.Sub)
 		// Drop other signers' identity codes unless the viewer is the owner (who entered
-		// them) — a co-signer must never receive another party's code.
+		// them) — a co-signer must never receive another party's code. The same rule
+		// covers a signer's return address: the viewer gets their own (it is where the
+		// portal offers to send them back), the owner every one, nobody another party's.
 		if !isOwnerViewer {
 			slots[i].IdentityRef = ""
+			if !slots[i].You {
+				slots[i].ReturnURL = ""
+			}
 		}
 		if s.JobID == "" || r.Signflow() == nil {
 			continue

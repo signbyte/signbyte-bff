@@ -43,9 +43,10 @@ func getComposedWire(t *testing.T, app *api.App, sid string) composedWire {
 }
 
 // TestGetEnvelopeCarriesOriginAndOwnReturnURLForCoSigner proves the composed view
-// carries the envelope's origin — the system that prepared it — to a viewer, and the
-// viewer's own return address on their own slot; another signer's return address,
-// like their identity code, never reaches a viewer who is not the owner.
+// carries the envelope's origin — the system that prepared it, by name and reference —
+// to a viewer, and the viewer's own return address on their own slot; another signer's
+// return address, like their identity code, never reaches a viewer who is not the owner,
+// and a default address the envelope service may still store on the origin reaches nobody.
 func TestGetEnvelopeCarriesOriginAndOwnReturnURLForCoSigner(t *testing.T) {
 	app := api.TestApp(t)
 	qt.Assert(t, qt.IsNil(Init(app)))
@@ -69,8 +70,9 @@ func TestGetEnvelopeCarriesOriginAndOwnReturnURLForCoSigner(t *testing.T) {
 
 	out := getComposedWire(t, app, sid)
 
-	qt.Assert(t, qt.Equals(string(out.Envelope["origin"]),
-		`{"name":"Acme DMS","returnUrl":"https://dms.acme.example/return","ref":"contracts/2026-117"}`))
+	// The stored default address is not the viewer's business — nor anyone's: a return
+	// belongs to one signer and travels on their slot.
+	qt.Assert(t, qt.Equals(string(out.Envelope["origin"]), `{"name":"Acme DMS","ref":"contracts/2026-117"}`))
 	qt.Assert(t, qt.Equals(len(out.Slots), 2))
 	qt.Check(t, qt.Equals(string(out.Slots[0]["you"]), "true"))
 	qt.Check(t, qt.Equals(string(out.Slots[0]["returnUrl"]), `"https://dms.acme.example/contracts/2026-117"`))

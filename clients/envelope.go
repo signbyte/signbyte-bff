@@ -128,14 +128,15 @@ type EnvelopeView struct {
 	Origin *Origin `json:"origin,omitempty"`
 }
 
-// Origin names the system that prepared an envelope: its registered display name, the
-// default address the signer's browser is offered back to, and its own reference for
-// the envelope. Relayed as the envelope service returns it — the service that created
-// the envelope checked the return address against the requester's registration.
+// Origin names the system that prepared an envelope: its registered display name and its
+// own reference for the envelope. A return address is never part of it: the way back
+// belongs to one signer and travels on that signer's slot, so an address of the requester
+// reaches only the browser it was meant for — never a co-signer the requester did not give
+// one to. The envelope service may still store a default for older envelopes; this view
+// does not decode it, so it cannot relay it.
 type Origin struct {
-	Name      string `json:"name"`
-	ReturnURL string `json:"returnUrl,omitempty"`
-	Ref       string `json:"ref,omitempty"`
+	Name string `json:"name"`
+	Ref  string `json:"ref,omitempty"`
 }
 
 // Slot is one signer slot in the detailed view. IdentityRef (the invited signer's

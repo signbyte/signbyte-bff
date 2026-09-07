@@ -7,9 +7,13 @@ runs the service or integrates against it.
 
 **The composed envelope view says who requested the signing, and where each signer goes back.**
 When a document system prepared an envelope through the platform's integration API, the envelope
-carries an origin — the requester's registered display name, its default return address, its own
-reference — and each signer may carry their own return address. `GET /api/portal/v1/envelopes/{id}`
-now relays them, so the portal can show *Requested by Acme DMS* and, after the ceremony, offer
+carries an origin — the requester's registered display name and its own reference — and each signer
+may carry their own return address. `GET /api/portal/v1/envelopes/{id}` now relays them, so the portal
+can show *Requested by Acme DMS* and, after the ceremony, offer *Return to Acme DMS*. **A default
+return address the envelope may store on its origin is relayed to nobody** (2026-09-07): the way back
+belongs to one signer and travels on that signer's slot, so an outside co-signer is never handed the
+requester's location by omission. The view is described below as first shipped, with that one change: the
+composed `origin` carries `name` and `ref` only. It lets the portal show the requester and, after the ceremony, offer
 *Return to Acme DMS*:
 
 ```http

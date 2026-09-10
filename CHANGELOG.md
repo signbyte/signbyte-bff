@@ -5,6 +5,18 @@ runs the service or integrates against it.
 
 ## v0.2.0
 
+### Changed — a co-signer must be a person, not an organisation
+
+An invitation whose `identityRef` names a **legal person** — a trade-register number (`NTR…`) or any other
+organisation identifier — is refused on both invite bodies (`POST /envelopes` and
+`POST /envelopes/{id}/slots`) with `422 err:request:unprocessable`. An organisation does not sign: it applies
+an e-seal, which is a method one of its people chooses after authenticating as themselves. A slot invited
+under an organisation's number could never be matched by any login, so it would sit as a pending signature
+that never arrives.
+
+Every **natural-person** identity type is accepted unchanged — `PNO`, `PAS`, `IDC`, `TIN` — in any of the four
+spellings, with the country beside a bare code.
+
 **The composed envelope view says who requested the signing, and where each signer goes back.**
 When a document system prepared an envelope through the platform's integration API, the envelope
 carries an origin — the requester's registered display name and its own reference — and each signer
@@ -53,6 +65,42 @@ default, and still answered only for trusted addresses (`METRICS_TRUSTED_IPS`, `
 default) — so if nothing scrapes this service, there is nothing to do. The change arrives from the
 web framework this service is built on rather than from a change of its own, carried in with the
 shared libraries below.
+
+### Added — a `country` beside the invited signer's identity code
+
+Both invite bodies now take an optional two-letter `country` beside `identityRef`, and the code is
+rewritten to **one canonical spelling** before it is relayed — the identity type, the country, a
+hyphen, and the national code with its separators removed:
+
+```http
+POST /api/portal/v1/envelopes
+Content-Type: application/json
+
+{ "title": "contract", "slots": [ { "orderIndex": 1, "identityRef": "010180-15097", "country": "LV" } ] }
+```
+
+The envelope service is asked to store `PNOLV-01018015097`. The same applies to
+`POST /api/portal/v1/envelopes/{id}/slots`.
+
+`country` is used **only** when the code names none of its own. A code that already says which
+country's register issued it is believed, whatever was chosen — a Lithuanian colleague's
+`PNOLT-…` pasted while the list still shows Latvia stays Lithuanian, because the same eleven digits
+belong to a different person in a different country.
+
+A code that names no country **and** comes with none is refused with the service's ordinary
+`422 err:request:unprocessable`. Nothing is guessed: the person inviting is the last one who can
+still answer the question, and an invitation filed under the wrong nationality is one its recipient
+can never claim. **The refusal names no field** — this service withholds error detail at the public
+boundary, as it does for every rejected request — so the screen that collects the code is where a
+person is told what to fix.
+
+### Changed — a signer sees their own slot however each side spells their code
+
+The *this slot is yours* marker on the composed envelope view now compares identity **keys** rather
+than text, on both sides: the slot's stored code and the code in the viewer's own token are each
+reduced to the one canonical spelling first. A person invited as `PNOLV-010180-15097` who signs in
+with a card whose certificate spells it `PNOLV-01018015097` is now shown their slot; before, they
+were not, and nothing on the screen said why.
 
 ### Notes
 

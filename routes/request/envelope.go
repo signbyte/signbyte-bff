@@ -20,6 +20,10 @@ type SlotEntry struct {
 	Flow        string `json:"flow,omitempty"`
 	RequiredLoa string `json:"requiredLoa,omitempty"`
 	IdentityRef string `json:"identityRef,omitempty"`
+	// Country is the two-letter country whose register issued IdentityRef —
+	// what the person inviting chose beside the code they typed. It is used
+	// only when the code itself names no country; one that does is believed.
+	Country string `json:"country,omitempty" validate:"omitempty,len=2,alpha"`
 }
 
 // Validate implements azugo.Validator.
@@ -44,6 +48,10 @@ type AddSlot struct {
 	Flow        string `json:"flow,omitempty"`
 	RequiredLoa string `json:"requiredLoa,omitempty"`
 	IdentityRef string `json:"identityRef,omitempty"`
+	// Country is the two-letter country whose register issued IdentityRef —
+	// what the person inviting chose beside the code they typed. It is used
+	// only when the code itself names no country; one that does is believed.
+	Country string `json:"country,omitempty" validate:"omitempty,len=2,alpha"`
 }
 
 // Validate implements azugo.Validator.

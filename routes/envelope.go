@@ -16,28 +16,6 @@ import (
 	"github.com/signbyte/signbyte-bff/session"
 )
 
-// The identity types a person can be invited under. The standard splits them:
-// a personal number, a passport, an identity card and a tax number belong to a
-// natural person and are carried in a certificate's serialNumber, while a trade
-// register number, a VAT number and their siblings identify a LEGAL person and are
-// carried in organizationIdentifier.
-//
-// Only the first group can be invited to sign. A signer slot is matched against the
-// identity of whoever logs in, and nobody logs in as an organisation — an
-// organisation's e-seal is a signing METHOD its people choose after authenticating as
-// themselves. So a slot invited under an organisation's number is a row no login can
-// ever reach: it would sit there looking like a pending signature that will never
-// arrive.
-//
-// The set is deliberately small and local. Widening it is a decision about who may be
-// invited, not a detail of parsing.
-var naturalPersonTypes = map[string]struct{}{
-	"PNO": {}, // a national personal number
-	"PAS": {}, // a passport number
-	"IDC": {}, // a national identity card number
-	"TIN": {}, // a tax identification number
-}
-
 // inviteIdentity turns the identity code somebody typed into an invitation into
 // the one spelling the platform stores and compares, using the country they chose
 // beside it.
@@ -64,12 +42,16 @@ func inviteIdentity(name, code, country string) (string, error) {
 
 	// An organisation cannot be invited to sign. Refused here rather than stored,
 	// because the store would accept it: an identity code naming a legal person is a
-	// perfectly valid identity, just not one that can ever answer an invitation.
+	// perfectly valid identity, just not one that can ever answer an invitation. A
+	// slot invited under an organisation's number is a row no login can ever reach —
+	// nobody logs in as an organisation, since its e-seal is a signing METHOD its
+	// people choose after authenticating as themselves — so it would sit there
+	// looking like a pending signature that will never arrive.
 	parsed, err := identitycode.Parse(canonical)
 	if err != nil {
 		return "", azugo.ParamInvalidError{Name: name, Tag: "identityRef", Err: err}
 	}
-	if _, ok := naturalPersonTypes[parsed.Semantics]; !ok {
+	if !parsed.IsNaturalPerson() {
 		return "", azugo.ParamInvalidError{
 			Name: name,
 			Tag:  "identityRef",

@@ -1,11 +1,13 @@
 package routes
 
 import (
+	"fmt"
 	"strings"
 
 	"azugo.io/azugo"
 	"github.com/valyala/fasthttp"
 
+	"github.com/gmb-lib/go-authbyte/identitycode"
 	pkerrors "github.com/gmb-lib/go-platform-kit/errors"
 
 	"github.com/signbyte/signbyte-bff/asclient"
@@ -13,6 +15,52 @@ import (
 	"github.com/signbyte/signbyte-bff/routes/request"
 	"github.com/signbyte/signbyte-bff/session"
 )
+
+// inviteIdentity turns the identity code somebody typed into an invitation into
+// the one spelling the platform stores and compares, using the country they chose
+// beside it.
+//
+// The country is used only when the code names none of its own — a code that
+// already says which country's register issued it is believed, whatever was
+// chosen, because a partner's system and a person's typing are both allowed to be
+// right. A code that names no country and comes with none chosen is REFUSED here,
+// naming the field: the person inviting is the last one who can still answer the
+// question, and after this point nobody can. Guessing would file the invitation
+// under the wrong nationality, where the person it is for can never claim it.
+//
+// The refusal repeats no identity code back — it is personal data, and a rejected
+// request's error text is the least controlled place it could end up.
+func inviteIdentity(name, code, country string) (string, error) {
+	if code == "" {
+		return "", nil
+	}
+
+	canonical, err := identitycode.Canonical(code, country)
+	if err != nil {
+		return "", azugo.ParamInvalidError{Name: name, Tag: "identityRef", Err: err}
+	}
+
+	// An organisation cannot be invited to sign. Refused here rather than stored,
+	// because the store would accept it: an identity code naming a legal person is a
+	// perfectly valid identity, just not one that can ever answer an invitation. A
+	// slot invited under an organisation's number is a row no login can ever reach —
+	// nobody logs in as an organisation, since its e-seal is a signing METHOD its
+	// people choose after authenticating as themselves — so it would sit there
+	// looking like a pending signature that will never arrive.
+	parsed, err := identitycode.Parse(canonical)
+	if err != nil {
+		return "", azugo.ParamInvalidError{Name: name, Tag: "identityRef", Err: err}
+	}
+	if !parsed.IsNaturalPerson() {
+		return "", azugo.ParamInvalidError{
+			Name: name,
+			Tag:  "identityRef",
+			Err:  fmt.Errorf("%s identifies an organisation, which cannot be invited to sign", parsed.Semantics),
+		}
+	}
+
+	return canonical, nil
+}
 
 // createEnvelope creates a signing envelope on the user's behalf. The envelope
 // service derives the owner from the delegated identity; the app supplies the
@@ -58,13 +106,19 @@ func (r *router) createEnvelope(ctx *azugo.Context) {
 		Profile:     req.Profile,
 		Documents:   docs,
 	}
-	for _, s := range req.Slots {
+	for i, s := range req.Slots {
+		identityRef, err := inviteIdentity(fmt.Sprintf("slots[%d].identityRef", i), s.IdentityRef, s.Country)
+		if err != nil {
+			ctx.Error(err)
+
+			return
+		}
 		in.Slots = append(in.Slots, clients.SlotInput{
 			OrderIndex:  s.OrderIndex,
 			Role:        s.Role,
 			Flow:        s.Flow,
 			RequiredLoa: s.RequiredLoa,
-			IdentityRef: s.IdentityRef,
+			IdentityRef: identityRef,
 		})
 	}
 
@@ -163,7 +217,8 @@ func (r *router) listSigningTasks(ctx *azugo.Context) {
 	ctx.JSON(out)
 }
 
-// getEnvelope returns the composed envelope view: the envelope service's header,
+// getEnvelope returns the composed envelope view: the envelope service's header
+// (including the origin — the system that prepared the envelope — when there is one),
 // slots, and documents, with each slot that has a backing signing job enriched
 // with that job's live signing state. A slot whose live state cannot be read is
 // left without it rather than failing the whole view.
@@ -204,13 +259,21 @@ func (r *router) getEnvelope(ctx *azugo.Context) {
 		// completed envelope loses its download once the signing job is gone.
 		slots[i].ContainerID = s.SignedDocRef
 		// The viewer's own slot: an invited signer matched by eIDAS code, or — for the
-		// owner — their own (identity-code-less) slot.
-		slots[i].You = (s.IdentityRef != "" && s.IdentityRef == viewerSerial) ||
+		// owner — their own (identity-code-less) slot. Both sides are compared as
+		// identity KEYS rather than as text: the invitation and the login are written
+		// by different systems, and a person who is not shown their own slot has no
+		// way to find out why.
+		slots[i].You = (s.IdentityRef != "" && identitycode.Key(s.IdentityRef) == viewerSerial) ||
 			(s.IdentityRef == "" && detail.Envelope.Owner == obo.Sub)
 		// Drop other signers' identity codes unless the viewer is the owner (who entered
-		// them) — a co-signer must never receive another party's code.
+		// them) — a co-signer must never receive another party's code. The same rule
+		// covers a signer's return address: the viewer gets their own (it is where the
+		// portal offers to send them back), the owner every one, nobody another party's.
 		if !isOwnerViewer {
 			slots[i].IdentityRef = ""
+			if !slots[i].You {
+				slots[i].ReturnURL = ""
+			}
 		}
 		if s.JobID == "" || r.Signflow() == nil {
 			continue
@@ -381,12 +444,19 @@ func (r *router) addEnvelopeSlot(ctx *azugo.Context) {
 		return
 	}
 
+	identityRef, err := inviteIdentity("identityRef", req.IdentityRef, req.Country)
+	if err != nil {
+		ctx.Error(err)
+
+		return
+	}
+
 	id, err := r.Envelope().AddSlot(ctx, obo, ctx.Params.String("id"), clients.SlotInput{
 		OrderIndex:  req.OrderIndex,
 		Role:        req.Role,
 		Flow:        req.Flow,
 		RequiredLoa: req.RequiredLoa,
-		IdentityRef: req.IdentityRef,
+		IdentityRef: identityRef,
 	})
 	if err != nil {
 		r.relayErr(ctx, err)

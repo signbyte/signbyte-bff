@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/gmb-lib/go-authbyte/dpop"
+	"github.com/gmb-lib/go-authbyte/identitycode"
 	"github.com/gmb-lib/go-platform-kit/observability"
 	"github.com/gmb-lib/go-platform-kit/propagation"
 )
@@ -388,9 +389,16 @@ func SubjectFromToken(token string) string {
 }
 
 // SerialFromToken reads the signer's eIDAS identity code (the serial_number claim) a
-// token carries. It is the key that matches the authenticated user to an invited
-// signer slot (whose identity_ref is that code), so the app can tell which slot is
-// the viewer's own. Returns "" when the claim is absent.
+// token carries, in the one spelling this platform compares. It is the key that
+// matches the authenticated user to an invited signer slot (whose identity_ref is
+// that code), so the app can tell which slot is the viewer's own. Returns "" when
+// the claim is absent.
+//
+// The claim is already canonical when it comes from this platform's own identity
+// service. It is reduced again here because this is the matching side of an
+// invitation somebody else wrote: the failure this guards against is a person
+// looking at their own signing task and not being offered it, which tells them
+// nothing about why.
 func SerialFromToken(token string) string {
 	parts := strings.Split(token, ".")
 	if len(parts) < 2 {
@@ -407,7 +415,11 @@ func SerialFromToken(token string) string {
 		return ""
 	}
 
-	return claims.SerialNumber
+	if claims.SerialNumber == "" {
+		return ""
+	}
+
+	return identitycode.Key(claims.SerialNumber)
 }
 
 // LoginBindingFromToken reads the login_method + loa claims a token is bound to and

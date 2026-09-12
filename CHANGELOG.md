@@ -111,6 +111,16 @@ were not, and nothing on the screen said why.
   service depends on; a third has no fix available yet and was already present before the move, and
   the vulnerability scanner reports nothing this service's own code can reach.
 
+### Changed — the shared libraries move to their current releases
+
+`go-platform-kit` v1.11.3, `go-authbyte` v0.23.1, `go-docgate` v1.0.4, `go-gdpr-audit` v1.1.5,
+`go-sec-events` v1.2.1 and `go-validation-answer` v1.1.2 (with `go-asice` v1.6.2 arriving indirectly
+through the document gate). No endpoint, field, error or setting changes with them, nothing in your
+configuration needs touching, and this service's own behaviour is unchanged — the validation answer
+it relays has the same shape, and the upload gate admits and refuses exactly what it did before.
+`go-sec-events` crosses v1.2.0 on the way, which allows a security event to be emitted from work
+with no request behind it — an addition to the library, not a change here.
+
 ## v0.1.0
 
 Initial code.

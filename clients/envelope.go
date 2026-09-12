@@ -122,6 +122,21 @@ type EnvelopeView struct {
 	OrderPolicy string `json:"orderPolicy,omitempty"`
 	Version     int    `json:"version"`
 	CreatedAt   string `json:"createdAt,omitempty"`
+	// Origin is the system that prepared the envelope for its own user, when one did —
+	// absent for an envelope started in the portal. The app shows "Requested by <name>"
+	// and, after the ceremony, offers the signer a way back.
+	Origin *Origin `json:"origin,omitempty"`
+}
+
+// Origin names the system that prepared an envelope: its registered display name and its
+// own reference for the envelope. A return address is never part of it: the way back
+// belongs to one signer and travels on that signer's slot, so an address of the requester
+// reaches only the browser it was meant for — never a co-signer the requester did not give
+// one to. The envelope service may still store a default for older envelopes; this view
+// does not decode it, so it cannot relay it.
+type Origin struct {
+	Name string `json:"name"`
+	Ref  string `json:"ref,omitempty"`
 }
 
 // Slot is one signer slot in the detailed view. IdentityRef (the invited signer's
@@ -142,6 +157,10 @@ type Slot struct {
 	// SignerName is the display name of the person filling this slot, captured from their
 	// own authenticated session on their first open. Empty until they participate.
 	SignerName string `json:"signerName,omitempty"`
+	// ReturnURL is this signer's own return address, overriding the envelope origin's
+	// default; set by the system that prepared the envelope. Forwarded to the app only
+	// on the viewer's own slot (or every slot for the owner) — see the composed view.
+	ReturnURL string `json:"returnUrl,omitempty"`
 }
 
 // DocRef is one document attached to an envelope. Filename is resolved by the BFF from

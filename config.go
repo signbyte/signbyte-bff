@@ -95,6 +95,11 @@ type Configuration struct {
 	SignerBaseURL string `mapstructure:"signer_base_url" validate:"omitempty,url"`
 	// SignerAudience targets the outbound service token at the signing service.
 	SignerAudience string `mapstructure:"signer_audience"`
+	// SignerFlowsTTL is how long the signing service's answer to which signing
+	// flows it runs is reused before it is asked again (a failure to answer is
+	// remembered as long). The session's permitted flows are narrowed to that
+	// answer, so the app never offers a method the deployment does not run.
+	SignerFlowsTTL time.Duration `mapstructure:"signer_flows_ttl" validate:"gt=0"`
 	// VerifyMaxBytes caps the uploaded verify file; larger uploads are rejected
 	// before any bytes are forwarded upstream.
 	VerifyMaxBytes int64 `mapstructure:"verify_max_bytes" validate:"gt=0"`
@@ -190,6 +195,8 @@ func (c *Configuration) Bind(_ string, v *viper.Viper) {
 	v.SetDefault("verify_concurrent_per_ip", 1)
 	_ = v.BindEnv("signer_base_url", "SIGNER_BASE_URL")
 	_ = v.BindEnv("signer_audience", "SIGNER_AUDIENCE")
+	v.SetDefault("signer_flows_ttl", time.Minute)
+	_ = v.BindEnv("signer_flows_ttl", "SIGNER_FLOWS_TTL")
 	_ = v.BindEnv("verify_max_bytes", "VERIFY_MAX_BYTES")
 	_ = v.BindEnv("verify_rate_per_minute", "VERIFY_RATE_PER_MINUTE")
 	_ = v.BindEnv("verify_rate_burst", "VERIFY_RATE_BURST")

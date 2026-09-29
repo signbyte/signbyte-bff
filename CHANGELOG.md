@@ -3,6 +3,23 @@
 Notable changes to this service, newest first, per release. This file is written for whoever
 runs the service or integrates against it.
 
+## v0.3.0
+
+### Changed — the app is offered only the signing methods this deployment runs
+
+`/me`'s `permitted_flows` are now the flows the login permits **and** the signing service runs. The BFF reads
+the signing service's `GET /api/v1/info` with its own identity (the grant it already holds for the public
+verify, `signatures:read`) and reuses the answer for `SIGNER_FLOWS_TTL` (default one minute). A deployment
+without a CSC client therefore never shows a CSC signing card that would be refused.
+
+```json
+GET /api/portal/v1/me      (a Web eID login; the signing service runs no CSC flow)
+{ "login_method": "webEid", "permitted_flows": ["webEid"], … }
+```
+
+When the signing service cannot be asked, the last answer is used; before any answer, the login's flows are
+listed as they are, and `/me` keeps answering.
+
 ## v0.2.0
 
 ### Changed — a co-signer must be a person, not an organisation

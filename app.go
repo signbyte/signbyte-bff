@@ -79,6 +79,12 @@ type App struct {
 	// URL + the outbound client are configured.
 	verify *clients.Verify
 
+	// offered narrows a session's permitted signing flows to the ones the signing
+	// service runs, asked with this service's own identity. Nil until the signer
+	// base URL + the outbound client are configured (the flows stay as the login
+	// permits them).
+	offered *clients.OfferedFlows
+
 	// audit records user-facing GDPR personal-data access (e.g. a document
 	// download). Never nil after init — a no-op recorder when access-audit is not
 	// configured.
@@ -194,6 +200,7 @@ func (a *App) init() error {
 	}
 	if a.outboundClient != nil && cfg.SignerBaseURL != "" {
 		a.verify = clients.NewVerify(a.outboundClient, cfg.SignerBaseURL, cfg.SignerAudience)
+		a.offered = clients.NewOfferedFlows(clients.NewOffer(a.outboundClient, cfg.SignerBaseURL, cfg.SignerAudience), cfg.SignerFlowsTTL)
 	}
 
 	// GDPR-audit: the user-facing personal-data access records the Portal-API makes
@@ -317,6 +324,10 @@ func (a *App) Verify() *clients.Verify { return a.verify }
 // (never nil after init; a no-op when access-audit is not configured).
 func (a *App) Audit() *audit.Recorder { return a.audit }
 
+// OfferedFlows returns what the signing service runs (nil until the signer base
+// URL is configured).
+func (a *App) OfferedFlows() *clients.OfferedFlows { return a.offered }
+
 // VerifyAudit returns the verify abuse-evidence recorder (never nil after
 // init; a no-op when access-audit is not configured).
 func (a *App) VerifyAudit() *audit.VerifyRecorder { return a.verifyAudit }
@@ -345,6 +356,9 @@ func (a *App) SetVerify(v *clients.Verify) { a.verify = v }
 
 // SetAudit injects the GDPR-audit recorder (test use only).
 func (a *App) SetAudit(rec *audit.Recorder) { a.audit = rec }
+
+// SetOfferedFlows injects what the signing service runs (test use only).
+func (a *App) SetOfferedFlows(o *clients.OfferedFlows) { a.offered = o }
 
 // SetVerifyAudit injects the verify abuse-evidence recorder (test use only).
 func (a *App) SetVerifyAudit(rec *audit.VerifyRecorder) { a.verifyAudit = rec }

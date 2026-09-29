@@ -108,7 +108,9 @@ type SignatureInfo = answer.Signature
 // an audited disclosure.
 type Validation = answer.Validation
 
-// BeginSigning starts a signing job for the user's document.
+// BeginSigning starts a signing job for the user's document. A slow-operation
+// call: the signing provider sometimes holds the first request of a signing
+// without answering, and the orchestrator waits for it.
 func (c *Signflow) BeginSigning(ctx context.Context, obo OnBehalf, in BeginInput) (*Job, error) {
 	body, err := json.Marshal(in)
 	if err != nil {
@@ -118,7 +120,7 @@ func (c *Signflow) BeginSigning(ctx context.Context, obo OnBehalf, in BeginInput
 	url := c.baseURL + "/api/v1/signings"
 
 	var out Job
-	if err := doJSONOnBehalf(ctx, c.doer, "signflow", c.audience, scopeSigCreate, http.MethodPost, url, obo, body, "application/json", &out); err != nil {
+	if err := doJSONOnBehalfSlow(ctx, c.doer, "signflow", c.audience, scopeSigCreate, http.MethodPost, url, obo, body, "application/json", &out); err != nil {
 		return nil, err
 	}
 

@@ -26,12 +26,14 @@ type Doer interface {
 	DoServiceOnBehalfWithTimeout(ctx context.Context, timeout time.Duration, audience, scope, subjectSub, subjectToken, method, fullURL string, reqHeader http.Header, body []byte) (*authclient.BackgroundResponse, error)
 }
 
-// slowOpTimeout is the per-call ceiling for the validate and archive-timestamp
-// compositions. The work behind them (a long-term-archival validation checks
-// the archive-timestamp chain plus long-term revocation material) legitimately
-// runs tens of seconds, and the orchestrator beneath this hop allows its own
-// provider call 90s — this outer ceiling must outlast that, where the default
-// service-call timeout would abandon a request that goes on to succeed.
+// slowOpTimeout is the per-call ceiling for starting a signing and for the
+// validate and archive-timestamp compositions. The work behind them legitimately
+// runs tens of seconds (a long-term-archival validation checks the
+// archive-timestamp chain plus long-term revocation material; the signing provider
+// sometimes holds the first request of a signing without answering), and the
+// orchestrator beneath this hop allows its own provider call 90s — this outer
+// ceiling must outlast that, where the default service-call timeout would abandon
+// a request that goes on to succeed.
 const slowOpTimeout = 120 * time.Second
 
 // OnBehalf carries the end-user identity a call acts for: the user's subject and

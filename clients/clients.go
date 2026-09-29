@@ -30,7 +30,7 @@ type Doer interface {
 // validate and archive-timestamp compositions. The work behind them legitimately
 // runs tens of seconds (a long-term-archival validation checks the
 // archive-timestamp chain plus long-term revocation material; the signing provider
-// sometimes holds the first request of a signing without answering), and the
+// sometimes takes a minute to answer a request of a signing), and the
 // orchestrator beneath this hop allows its own provider call 90s — this outer
 // ceiling must outlast that, where the default service-call timeout would abandon
 // a request that goes on to succeed.

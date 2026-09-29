@@ -109,8 +109,8 @@ type SignatureInfo = answer.Signature
 type Validation = answer.Validation
 
 // BeginSigning starts a signing job for the user's document. A slow-operation
-// call: the signing provider sometimes holds the first request of a signing
-// without answering, and the orchestrator waits for it.
+// call: the signing provider sometimes takes a minute to answer a request of a
+// signing, and the orchestrator waits for it.
 func (c *Signflow) BeginSigning(ctx context.Context, obo OnBehalf, in BeginInput) (*Job, error) {
 	body, err := json.Marshal(in)
 	if err != nil {

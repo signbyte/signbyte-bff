@@ -9,8 +9,8 @@ runs the service or integrates against it.
 
 Signing a slot now waits up to **120 s** for the orchestrator to begin the job, as validation and
 archive-timestamping already do; it used to give up after the default 15 s. The provider behind the
-signing service sometimes holds the first request of a signing without answering, and the person was shown
-`502` for a signing that then began anyway. Nothing to configure.
+signing service sometimes takes a minute to answer a request of a signing, and the person was shown `502`
+for a signing that then began anyway. Nothing to configure.
 
 ### Changed — the app is offered only the signing methods this deployment runs
 

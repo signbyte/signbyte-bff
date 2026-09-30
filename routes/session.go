@@ -242,7 +242,7 @@ func (r *router) me(ctx *azugo.Context) {
 		Name:           id.Name,
 		LoA:            id.LoA,
 		LoginMethod:    id.LoginMethod,
-		PermittedFlows: id.PermittedFlows,
+		PermittedFlows: r.offeredOnly(ctx, id.PermittedFlows),
 	}
 
 	// Seal availability, when the login captured it: ids and display labels
@@ -455,6 +455,37 @@ func capabilitiesFromTokens(tokens *asclient.Tokens) *session.Capabilities {
 	}
 	for _, s := range c.Seals {
 		out.Seals = append(out.Seals, session.Seal(s))
+	}
+
+	return out
+}
+
+// offeredOnly narrows the flows a login permits to the ones the signing service
+// runs, in the login's order, so the app offers no method the deployment would
+// refuse. Nothing learned from the signing service yet (it has not answered since
+// this service started, or no signing service is configured) leaves them as the
+// login permits them: the signing service's own refusal stays the floor.
+func (r *router) offeredOnly(ctx *azugo.Context, permitted []string) []string {
+	o := r.OfferedFlows()
+	if o == nil {
+		return permitted
+	}
+	offered, err := o.Get(ctx)
+	if err != nil {
+		ctx.Log().Warn("signing flows the signing service runs are not current", zap.Error(err))
+	}
+	if offered == nil {
+		return permitted
+	}
+	runs := make(map[string]bool, len(offered))
+	for _, f := range offered {
+		runs[f] = true
+	}
+	out := make([]string, 0, len(permitted))
+	for _, f := range permitted {
+		if runs[f] {
+			out = append(out, f)
+		}
 	}
 
 	return out

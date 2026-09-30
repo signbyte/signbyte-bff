@@ -56,7 +56,7 @@ Base path `/api/portal/v1`. The session is a cookie: **anonymous** endpoints est
 | `GET /api/portal/v1/login/callback` | anonymous | Land the browser back, redeem the code for a key-bound token, set the session cookie, redirect to the SPA |
 | `POST /api/portal/v1/login/webeid/start` | anonymous | Begin an eID-card login: mint the key + verifier, request a card challenge, park the flow, return `{nonce, state}` |
 | `POST /api/portal/v1/login/webeid/complete` | anonymous | Redeem the card token (signed in the browser) for a key-bound token, establish the session, return `{ok}` |
-| `GET /api/portal/v1/me` | session | The user's identity + permitted signing flows (composed from authbyte-core), plus seal availability when the login captured it: `can_eseal` (null = unknown, false = verifiably none) and `seals[{id,label}]` for the picker — certificates never reach the browser |
+| `GET /api/portal/v1/me` | session | The user's identity + permitted signing flows (composed from authbyte-core, narrowed to the flows the signing service runs — see `SIGNER_FLOWS_TTL`), plus seal availability when the login captured it: `can_eseal` (null = unknown, false = verifiably none) and `seals[{id,label}]` for the picker — certificates never reach the browser |
 | `POST /api/portal/v1/session/refresh` | session + CSRF | Re-issue the access token within the session |
 | `POST /api/portal/v1/logout` | session + CSRF | Invalidate the session, clear the cookies, return the front-channel logout URL |
 | `POST /api/portal/v1/step-up` | session + CSRF | Ask authbyte-core to elevate to a stronger login method; relay its instruction to the SPA |
@@ -235,8 +235,9 @@ Standard fleet env (`SERVER_URLS`, `SERVICE_NAME`, `ENVIRONMENT`, `LOG_*`, `OTEL
 | `ACCESS_AUDIT_AUDIENCE` | `svc:access-audit` | Audience of the outbound service token to access-audit |
 | `ACCESS_AUDIT_SCOPE` | `access-audit:write` | Scope requested on that token |
 | `ACCESS_AUDIT_OUTBOX_DIR` | — (⇒ in-memory) | When set, buffers undelivered access records to disk for crash-durable background retry |
-| `SIGNER_BASE_URL` | — (empty ⇒ verify off) | Signing-service base URL for the public verify proxy; unset ⇒ `POST /verify` fails closed with `503`. The verify call runs client-credentials (no user on the path) under a 90s per-call ceiling — long-term-archival validations legitimately run tens of seconds |
-| `SIGNER_AUDIENCE` | `svc:eparaksts-signer` | Audience of the outbound service token for the verify call |
+| `SIGNER_BASE_URL` | — (empty ⇒ verify off) | Signing-service base URL for the public verify proxy and for the read of which signing flows it runs; unset ⇒ `POST /verify` fails closed with `503` and `/me` lists the login's flows as they are. The verify call runs client-credentials (no user on the path) under a 90s per-call ceiling — long-term-archival validations legitimately run tens of seconds |
+| `SIGNER_FLOWS_TTL` | `1m` | How long the signing service's answer to which signing flows it runs (`GET /api/v1/info`, client-credentials, `signatures:read`, 5s ceiling) is reused. `/me`'s `permitted_flows` are the login's flows that the signing service runs, so the app never offers a method this deployment would refuse. When the signing service cannot be asked, the last answer is used; before any answer, the login's flows are listed as they are (the signing service's own refusal stays the floor). A failure is remembered as long as an answer, so an unreachable signing service costs one timeout per period, not one per page load |
+| `SIGNER_AUDIENCE` | `svc:eparaksts-signer` | Audience of the outbound service token for the verify call and the flows read |
 | `VERIFY_MAX_BYTES` | `26214400` (25 MB) | Upload cap on `POST /verify`, rejected before any proxying |
 | `VERIFY_RATE_PER_MINUTE` · `VERIFY_RATE_BURST` | `6` · `3` | Per-client-IP token bucket on `POST /verify` |
 | `VERIFY_CONCURRENT_PER_IP` | `1` | In-flight `POST /verify` requests allowed per client IP |

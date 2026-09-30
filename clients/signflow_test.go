@@ -28,6 +28,9 @@ func TestBeginSigningOnBehalf(t *testing.T) {
 	qt.Assert(t, qt.Equals(d.lastScope, scopeSigCreate))
 	qt.Assert(t, qt.Equals(d.lastMethod, http.MethodPost))
 	qt.Assert(t, qt.Equals(d.lastURL, "http://signflow:8080/api/v1/signings"))
+	// Starting a signing may wait on a provider that holds its first request: the
+	// slow-operation ceiling, above the orchestrator's own.
+	qt.Assert(t, qt.Equals(d.lastTimeout, slowOpTimeout))
 }
 
 // TestOnBehalfBindingScopesCacheKey proves the login binding is folded into the

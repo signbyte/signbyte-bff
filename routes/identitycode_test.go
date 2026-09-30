@@ -262,9 +262,9 @@ func TestInviteRefusesAnOrganisation(t *testing.T) {
 func TestInviteAcceptsEveryNaturalPersonType(t *testing.T) {
 	for _, code := range []string{
 		"PNOLV-" + strings.Repeat("5", 11),
-		"PASSK-AB987654",
-		"IDCBE-888888888888",
-		"TINEL-123456789",
+		"PASSK-AB" + strings.Repeat("9", 6),
+		"IDCBE-" + strings.Repeat("7", 12),
+		"TINEL-" + strings.Repeat("4", 9),
 	} {
 		t.Run(code, func(t *testing.T) {
 			status, sent := createEnvelopeBody(t,

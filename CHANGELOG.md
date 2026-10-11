@@ -3,6 +3,41 @@
 Notable changes to this service, newest first, per release. This file is written for whoever
 runs the service or integrates against it.
 
+## v0.3.1
+
+A security release. **The service now builds with Go 1.27.2**, and its libraries move to their Go
+1.27.2 releases. Nothing about the API, the configuration or the database changes.
+
+### Changed
+
+- **Go 1.27.2** (was 1.27.0), both in `go.mod` and as the image's default build toolchain
+  (`ARG GO_VERSION` in the `Dockerfile`). Go 1.27.2 and `golang.org/x/net` v0.60.0 fix
+  vulnerabilities that this service's code reaches under 1.27.0: `govulncheck` found nine it calls,
+  GO-2026-6603, -6605, -6607, -6608, -6610, -6611, -6612, -6613 and -6617, in `net/http`,
+  `crypto/tls`, `mime/multipart` and `golang.org/x/net`. Under the new set it finds none. **Rebuild
+  the image to pick the fixes up**; an image built before this change still carries them.
+- **Libraries:** `go-authbyte` → v0.29.1 (from v0.23.1), `go-platform-kit` → v1.11.4,
+  `go-sec-events` → v1.2.2, `go-gdpr-audit` → v1.1.6, `go-docgate` → v1.0.5, `go-validation-answer`
+  → v1.1.3, azugo → v0.40.0, `go-redis` → v9.23.0, `fasthttp` → v1.75.0, plus 42 indirect modules
+  with them. The go-authbyte releases in between add features this service does not use, with one
+  visible change: when the authorization server refuses a token request, the error no longer repeats
+  the server's answer, so a log line built from that error stops carrying it (the message is now
+  `the token call responded <status>`). azugo v0.40.0 changed how cookies are named and read; the
+  session cookies are unaffected. Both are still written under the configured name and
+  `portal_csrf`, with `Path=/`, `SameSite=Lax` and `Secure` over TLS: the new `__Host-`/`__Secure-`
+  naming applies only to cookies written with azugo's default-security option, which this service
+  does not use. Reading a cookie now also finds a `__Host-` or `__Secure-` variant under its bare
+  name; this service never writes one. Nothing else in azugo v0.40.0 reaches it (no redirects after
+  a non-GET request, no outbound calls through azugo's HTTP client, no azugo cache of its own).
+
+### Notes
+
+- CI's linter moved to golangci-lint v2.14.0. The earlier release cannot read Go 1.27.2's compiled
+  standard library and stops before linting anything.
+- The gate is green on Go 1.27.2: `go mod verify`, `go mod tidy -diff`, build, vet, `gofmt`,
+  golangci-lint v2.14.0, `go test -race` with **0 races**; `govulncheck` reports **no
+  vulnerabilities found**.
+
 ## v0.3.0
 
 ### Changed — starting a signing no longer fails while the signing service is still starting it

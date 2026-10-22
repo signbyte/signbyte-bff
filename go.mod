@@ -1,6 +1,6 @@
 module github.com/signbyte/signbyte-bff
 
-go 1.27.2
+go 1.27.3
 
 require (
 	azugo.io/azugo v0.40.0

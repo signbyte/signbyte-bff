@@ -129,7 +129,7 @@ flowchart TB
     end
 
     subgraph Clients["clients/ — on-behalf composition"]
-        OBO["doOnBehalf — token exchange, fail-closed<br/>+ delegated-token cache key (subject | login-binding)"]
+        OBO["doOnBehalf — token exchange, fail-closed"]
         C1["Documents"]; C2["Envelope"]; C3["Signflow"]; C4["Preview"]
     end
 
@@ -193,7 +193,7 @@ sequenceDiagram
 
 **Server-side** each session holds the per-session **sender-constraint key** (a freshly generated EC key, PKCS#8-serialized), the access/refresh tokens, the person's subject, the anti-forgery token, for a card login the card's authentication certificate captured at login, and — when the auth service captured one — the login's signing-capability set (sign identity, certificates, seals), stored on the code exchange, kept across refreshes, replaced on step-up, gone on logout. The capability certificates carry personal data: they stay server-side and are never logged. Every call `signbyte-bff` makes to authbyte-core (token, identity, step-up) carries a fresh [DPoP (RFC 9449)](https://www.rfc-editor.org/rfc/rfc9449) proof of possession of that key, retrying once on a server-issued nonce; the tokens are therefore useless without the key, and the key never leaves the server. Login uses the OpenID Connect authorization-code flow with [PKCE (RFC 7636)](https://www.rfc-editor.org/rfc/rfc7636) `S256`, and always sends `prompt=login` so a lingering upstream SSO session cannot silently answer with a different login method than the one requested (the login method binds which signing flows are permitted).
 
-**To reach a domain service** the handler exchanges the user's access token for a downstream token that carries the *user's* identity, via [OAuth 2.0 Token Exchange (RFC 8693)](https://www.rfc-editor.org/rfc/rfc8693). document-store, envelope, signflow, and previewbyte each owner-filter on that delegated subject, so the user's own data is reachable and no cross-user access is possible. A call with no subject token does not fall back to this service's identity — it fails closed. The delegated token is cached (in the outbound client) keyed by **subject plus a login-binding discriminator** (`login_method` + `loa`): a delegated token bakes in those claims, and a person's subject is stable across login methods, so keying on subject alone would let a re-login with a *different* method reuse a token carrying the *old* method — which signflow's login-to-flow binding check would then reject. The binding never changes the audited actor (the subject); it only scopes the cache.
+**To reach a domain service** the handler exchanges the user's access token for a downstream token that carries the *user's* identity, via [OAuth 2.0 Token Exchange (RFC 8693)](https://www.rfc-editor.org/rfc/rfc8693). document-store, envelope, signflow, and previewbyte each owner-filter on that delegated subject, so the user's own data is reachable and no cross-user access is possible. A call with no subject token does not fall back to this service's identity — it fails closed. The delegated token is cached by the authentication library, keyed on a fingerprint of the user's own token, never on the person alone: a delegated token bakes in the claims of the token it was exchanged for (the login method, the assurance level, the organisation), so a re-login with a *different* method gets a fresh exchange instead of a token carrying the *old* method, which signflow's login-to-flow binding check would reject. A cached token is not reused once the user's token has expired.
 
 ---
 
@@ -269,7 +269,7 @@ signbyte-bff/
 │   └── memory.go    — in-memory store (development/test)
 ├── asclient/                                        — authbyte-core driver (auth-code + PKCE + DPoP + Web eID + step-up)
 ├── clients/                                         — on-behalf composition (token exchange, fail-closed)
-│   ├── clients.go   — doOnBehalf + delegated-token cache keying
+│   ├── clients.go   — doOnBehalf (token exchange, fail-closed)
 │   ├── document.go, envelope.go, signflow.go, preview.go
 ├── audit/                                           — GDPR access recorder + background outbox drain
 ├── Dockerfile, go.mod, go.sum

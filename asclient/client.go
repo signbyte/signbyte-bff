@@ -422,35 +422,6 @@ func SerialFromToken(token string) string {
 	return identitycode.Key(claims.SerialNumber)
 }
 
-// LoginBindingFromToken reads the login_method + loa claims a token is bound to and
-// returns them as a compact discriminator used to scope the on-behalf delegated-
-// token cache. A delegated token bakes in these claims, so the cache (which keys on
-// the stable person subject) must vary with them — otherwise a re-login as the same
-// person with a different method reuses a token carrying the old method. Returns ""
-// when neither claim is readable (the cache then falls back to subject-only keying).
-func LoginBindingFromToken(token string) string {
-	parts := strings.Split(token, ".")
-	if len(parts) < 2 {
-		return ""
-	}
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return ""
-	}
-	var claims struct {
-		LoginMethod string `json:"login_method"`
-		LoA         string `json:"loa"`
-	}
-	if err := json.Unmarshal(payload, &claims); err != nil {
-		return ""
-	}
-	if claims.LoginMethod == "" && claims.LoA == "" {
-		return ""
-	}
-
-	return "lm:" + claims.LoginMethod + "|loa:" + claims.LoA
-}
-
 // plainDo performs a request to the Auth Service with no proof of possession (the
 // card-login challenge + login hops, which are proven later at the token
 // exchange). path may carry a query string.

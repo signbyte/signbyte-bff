@@ -5,7 +5,6 @@ import (
 	"io"
 	"mime/multipart"
 
-	"github.com/signbyte/signbyte-bff/asclient"
 	"github.com/signbyte/signbyte-bff/clients"
 	"github.com/signbyte/signbyte-bff/routes/response"
 
@@ -553,9 +552,5 @@ func (r *router) onBehalf(ctx *azugo.Context) (clients.OnBehalf, bool) {
 	return clients.OnBehalf{
 		Sub:   sess.Subject,
 		Token: token,
-		// Scope the delegated-token cache to the session's login binding so a
-		// re-login as the same person with a different method never reuses a token
-		// carrying the old method (which signflow's login⇒flow gate would reject).
-		Binding: asclient.LoginBindingFromToken(token),
 	}, true
 }

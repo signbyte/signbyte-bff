@@ -3,6 +3,29 @@
 Notable changes to this service, newest first, per release. This file is written for whoever
 runs the service or integrates against it.
 
+## v0.3.2
+
+A security release. A token exchanged for one sign-in is no longer reused for another, and **the service now
+builds with Go 1.27.3**. Nothing about the API, the configuration or the database changes.
+
+### Security
+
+- **The authentication library moves to `go-authbyte` v0.31.1.** It caches a token exchanged on a user's behalf
+  under that user's own token, not under the person alone, and stops reusing it once the user's token has expired.
+  Before, a person who signed in again, with another method or into another organisation, could have this
+  service's calls to the domain services carried for a few minutes by the token exchanged for the earlier sign-in.
+  This service had guarded the sign-in method half of that itself, by adding the login method and assurance level
+  to the cache key; that guard is removed, since the library now covers every claim the token carries. Nothing to
+  configure; one more exchange per renewed sign-in.
+- **Go 1.27.3** (was 1.27.2), in `go.mod` and as the image's default build toolchain (`ARG GO_VERSION` in the
+  `Dockerfile`). Go 1.27.3 fixes GO-2026-6809 in `crypto/x509`, which code making TLS calls reaches. **Rebuild the
+  image to pick the fix up.**
+
+### Changed
+
+- **Libraries:** azugo → v0.40.1, `fasthttp` → v1.76.0, `pdfcpu` → v0.16.3, `valkey-go` → v1.0.79, `go-jose` →
+  v4.1.6, plus their indirect modules.
+
 ## v0.3.1
 
 A security release. **The service now builds with Go 1.27.2**, and its libraries move to their Go

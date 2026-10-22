@@ -4,11 +4,20 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
 	"net/url"
 	"testing"
 
 	"github.com/go-quicktest/qt"
 )
+
+// jwtWith builds a token whose (unverified) payload carries the given claims, so
+// the claim-reading helpers can be exercised without a real signer.
+func jwtWith(claims map[string]any) string {
+	payload, _ := json.Marshal(claims)
+	enc := base64.RawURLEncoding.EncodeToString
+	return enc([]byte(`{"alg":"none"}`)) + "." + enc(payload) + ".sig"
+}
 
 // TestAuthorizeURLAlwaysForcesLogin proves every authorization redirect carries
 // prompt=login — dropping it would let a live IdP SSO session silently answer with

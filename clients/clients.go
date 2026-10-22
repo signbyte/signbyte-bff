@@ -42,25 +42,6 @@ const slowOpTimeout = 120 * time.Second
 type OnBehalf struct {
 	Sub   string
 	Token string
-	// Binding scopes the delegated-token cache (which keys on the subject) to the
-	// login method + assurance the token is bound to. A delegated token bakes in
-	// those claims, and a person's subject is stable across login methods, so
-	// without this a re-login as the same person with a different method would reuse
-	// a cached token carrying the OLD method — and the downstream login⇒flow binding
-	// check then rejects it. Binding never changes Sub (the downstream/audit
-	// identity); empty falls back to subject-only cache keying.
-	Binding string
-}
-
-// cacheSub returns the value used as the delegated-token cache key: the subject,
-// plus the login binding when present, so cached tokens never cross login methods.
-// Sub itself is left untouched (it is the audited actor + downstream identity).
-func (o OnBehalf) cacheSub() string {
-	if o.Binding == "" {
-		return o.Sub
-	}
-
-	return o.Sub + "|" + o.Binding
 }
 
 // Response is a raw upstream response (used where the body is bytes, not JSON, and
@@ -95,7 +76,7 @@ func doOnBehalf(ctx context.Context, d Doer, service, audience, scope, method, u
 		hdr.Set("Content-Type", contentType)
 	}
 
-	resp, err := d.DoServiceOnBehalf(ctx, audience, scope, obo.cacheSub(), obo.Token, method, url, hdr, reqBody)
+	resp, err := d.DoServiceOnBehalf(ctx, audience, scope, obo.Sub, obo.Token, method, url, hdr, reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", service, err)
 	}
@@ -136,7 +117,7 @@ func doJSONOnBehalfSlow(ctx context.Context, d Doer, service, audience, scope, m
 		hdr.Set("Content-Type", contentType)
 	}
 
-	resp, err := d.DoServiceOnBehalfWithTimeout(ctx, slowOpTimeout, audience, scope, obo.cacheSub(), obo.Token, method, url, hdr, reqBody)
+	resp, err := d.DoServiceOnBehalfWithTimeout(ctx, slowOpTimeout, audience, scope, obo.Sub, obo.Token, method, url, hdr, reqBody)
 	if err != nil {
 		return fmt.Errorf("%s: %w", service, err)
 	}

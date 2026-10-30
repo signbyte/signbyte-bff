@@ -5,10 +5,22 @@ runs the service or integrates against it.
 
 ## v0.3.2
 
-A security release. A token exchanged for one sign-in is no longer reused for another, and **the service now
-builds with Go 1.27.3**. Nothing about the API, the configuration or the database changes.
+A security release. A token exchanged for one sign-in is no longer reused for another, a sign-out no longer puts
+the session's refresh token in the browser's address, and **the service now builds with Go 1.27.3**. Nothing about
+the API, the configuration or the database changes.
+
+**Needs authbyte v0.3.0 or later**, which ends a session at `POST /revoke` and names a step-up's session by
+`refresh_token`; an older authbyte refuses this service's step-up.
 
 ### Security
+
+- **Sign-out ends the session at authbyte server to server, and the browser's address names no session.** The
+  logout answer's `logoutUrl` used to carry the session's refresh token (`sid=`), so it reached the browser's
+  history and any log of that address. Now `POST /api/portal/v1/logout` first ends the session at authbyte with the
+  refresh token and a proof of the session's key, then answers a `logoutUrl` holding only the client, the landing
+  address and the login method (`login_method=`, which decides whether the browser passes through the identity
+  provider's logout). A refusal or an outage at authbyte is logged and does not keep the person signed in here.
+- **A step-up names the session to authbyte by its refresh token** (`refresh_token`; it was `session_id`).
 
 - **The authentication library moves to `go-authbyte` v0.31.1.** It caches a token exchanged on a user's behalf
   under that user's own token, not under the person alone, and stops reusing it once the user's token has expired.

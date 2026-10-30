@@ -58,22 +58,30 @@ func TestAuthorizeURLIncludesACRValuesWhenRequested(t *testing.T) {
 	qt.Check(t, qt.IsFalse(u.Query().Has("acr_values")))
 }
 
-// TestLogoutURLIncludesSidOnlyWhenPresent proves the front-channel logout redirect
-// carries the upstream session handle when known, and omits it (rather than
-// sending it empty) for a non-federated login with no upstream session.
-func TestLogoutURLIncludesSidOnlyWhenPresent(t *testing.T) {
+// The browser's sign-out address carries the client, where to land and the login
+// method, and nothing else: no value names the session. The method is left out
+// when unknown.
+func TestTheSignOutAddressNamesNoSession(t *testing.T) {
 	c := New("https://public", "https://internal", "client-1", "https://app/callback")
 
-	u, err := url.Parse(c.LogoutURL("https://app/login", "refresh-1"))
+	u, err := url.Parse(c.BrowserLogoutURL("https://app/login", "eparakstsMobile"))
 	qt.Assert(t, qt.IsNil(err))
 	qt.Check(t, qt.Equals(u.Path, "/logout"))
-	qt.Check(t, qt.Equals(u.Query().Get("client_id"), "client-1"))
-	qt.Check(t, qt.Equals(u.Query().Get("redirect_uri"), "https://app/login"))
-	qt.Check(t, qt.Equals(u.Query().Get("sid"), "refresh-1"))
+	qt.Check(t, qt.DeepEquals(u.Query(), url.Values{
+		"client_id":    {"client-1"},
+		"redirect_uri": {"https://app/login"},
+		"login_method": {"eparakstsMobile"},
+	}))
 
-	u, err = url.Parse(c.LogoutURL("https://app/login", ""))
+	u, err = url.Parse(c.BrowserLogoutURL("https://app/login", ""))
 	qt.Assert(t, qt.IsNil(err))
-	qt.Check(t, qt.IsFalse(u.Query().Has("sid")))
+	qt.Check(t, qt.IsFalse(u.Query().Has("login_method")))
+}
+
+func TestLoginMethodFromToken(t *testing.T) {
+	qt.Check(t, qt.Equals(LoginMethodFromToken(jwtWith(map[string]any{"login_method": "webEid"})), "webEid"))
+	qt.Check(t, qt.Equals(LoginMethodFromToken(jwtWith(map[string]any{"sub": "user-1"})), ""))
+	qt.Check(t, qt.Equals(LoginMethodFromToken("not-a-token"), ""))
 }
 
 func TestSubjectFromToken(t *testing.T) {

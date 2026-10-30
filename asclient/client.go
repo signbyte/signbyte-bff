@@ -107,9 +107,10 @@ type Identity struct {
 }
 
 // StepUpRequest asks the Auth Service to elevate an existing session to a
-// stronger login method.
+// stronger login method. The session is named by its refresh token, together with
+// the client the token was issued to.
 type StepUpRequest struct {
-	SessionID     string `json:"session_id"`
+	RefreshToken  string `json:"refresh_token"`
 	ClientID      string `json:"client_id"`
 	Method        string `json:"method"`
 	CodeChallenge string `json:"code_challenge"`
@@ -143,23 +144,46 @@ func (c *Client) AuthorizeURL(challenge, state, acrValues string) string {
 	return c.publicURL + "/authorize?" + q.Encode()
 }
 
-// LogoutURL builds the browser-facing front-channel logout redirect on the Auth
-// Service. The browser must navigate here (a top-level redirect) so the Auth
-// Service can, for an eParaksts-federated login, bounce on through the IdP logout
-// and clear its SSO cookie before landing back on redirectURI; a server-side call
-// could not clear a cookie that lives in the browser on the IdP's domain. sid is
-// the upstream session handle (the session's refresh token) so the Auth Service can
-// resolve the login method and terminate its own session. redirectURI must be
-// registered for this client.
-func (c *Client) LogoutURL(redirectURI, sid string) string {
+// BrowserLogoutURL builds the browser's leg of a sign-out: the front-channel
+// logout redirect on the Auth Service. The browser must navigate here (a top-level
+// redirect) so the Auth Service can, for an eParaksts-federated login, bounce on
+// through the IdP logout and clear its SSO cookie before landing back on
+// redirectURI; a server-side call could not clear a cookie that lives in the
+// browser on the IdP's domain. loginMethod decides whether that bounce happens and
+// is left out when empty. The address carries no value that names the session,
+// because a browser address is kept in history and logs: end the session with
+// Revoke first. redirectURI must be registered for this client.
+func (c *Client) BrowserLogoutURL(redirectURI, loginMethod string) string {
 	q := url.Values{}
 	q.Set("client_id", c.clientID)
 	q.Set("redirect_uri", redirectURI)
-	if sid != "" {
-		q.Set("sid", sid)
+	if loginMethod != "" {
+		q.Set("login_method", loginMethod)
 	}
 
 	return c.publicURL + "/logout?" + q.Encode()
+}
+
+// Revoke ends the session at the Auth Service, server to server [RFC 7009]: it
+// presents the session's refresh token as this client, with a proof of
+// possession of the session key. The Auth Service answers success also for a
+// token it no longer holds; an *Error carries any refusal or an outage.
+func (c *Client) Revoke(ctx context.Context, key *ecdsa.PrivateKey, refreshToken string) error {
+	form := url.Values{}
+	form.Set("token", refreshToken)
+	form.Set("token_type_hint", "refresh_token")
+	form.Set("client_id", c.clientID)
+
+	body, status, err := c.dpopDo(ctx, key, http.MethodPost, "/revoke", "",
+		"application/x-www-form-urlencoded", []byte(form.Encode()))
+	if err != nil {
+		return err
+	}
+	if status != http.StatusOK {
+		return &Error{Status: status, Body: string(body)}
+	}
+
+	return nil
 }
 
 // ExchangeCode redeems an authorization code for a token bound to key.
@@ -386,6 +410,29 @@ func SubjectFromToken(token string) string {
 	}
 
 	return claims.Sub
+}
+
+// LoginMethodFromToken reads the login method (the login_method claim) a token
+// carries, without verifying it: the token was just issued to this service, and the
+// method only decides whether a sign-out passes through the identity provider's
+// logout. Returns "" if it cannot be read.
+func LoginMethodFromToken(token string) string {
+	parts := strings.Split(token, ".")
+	if len(parts) < 2 {
+		return ""
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return ""
+	}
+	var claims struct {
+		LoginMethod string `json:"login_method"`
+	}
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		return ""
+	}
+
+	return claims.LoginMethod
 }
 
 // SerialFromToken reads the signer's eIDAS identity code (the serial_number claim) a

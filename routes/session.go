@@ -304,16 +304,25 @@ func (r *router) refresh(ctx *azugo.Context) {
 func (r *router) logout(ctx *azugo.Context) {
 	sid, sess := sessionFromCtx(ctx)
 
-	// Build the front-channel logout URL BEFORE deleting the session: the browser
-	// must navigate to the Auth Service so that, for an eParaksts-federated login, it
-	// bounces on through the IdP logout and clears its SSO cookie. Without this the
-	// IdP keeps its short-lived session and the next login is silently answered from
-	// it (the user cannot switch identity/method). The session's refresh token is the
-	// upstream handle that lets the Auth Service resolve the method + end its session.
+	// End the session at the Auth Service first, server to server, with the
+	// session's refresh token and key: the browser's address must never carry the
+	// token. A refusal or an outage there does not keep the person signed in here;
+	// the session there then ends at its own lifetime.
+	//
+	// Then build the front-channel logout URL: the browser must navigate to the
+	// Auth Service so that, for an eParaksts-federated login, it bounces on through
+	// the IdP logout and clears its SSO cookie. Without this the IdP keeps its
+	// short-lived session and the next login is silently answered from it (the user
+	// cannot switch identity/method). The login method decides that bounce.
 	logoutURL := ""
 	if sess != nil && r.AuthService() != nil {
+		if key, err := session.ParseKey(sess.Key); err == nil && sess.RefreshToken != "" {
+			if err := r.AuthService().Revoke(ctx, key, sess.RefreshToken); err != nil {
+				ctx.Log().Warn("the authentication service did not end the session at sign-out")
+			}
+		}
 		if redirect := r.Config().LogoutRedirectURI(); redirect != "" {
-			logoutURL = r.AuthService().LogoutURL(redirect, sess.RefreshToken)
+			logoutURL = r.AuthService().BrowserLogoutURL(redirect, asclient.LoginMethodFromToken(sess.AccessToken))
 		}
 	}
 
@@ -378,7 +387,7 @@ func (r *router) stepUp(ctx *azugo.Context) {
 	}
 
 	body, status, err := r.AuthService().StepUp(ctx, key, token, asclient.StepUpRequest{
-		SessionID:     sess.RefreshToken,
+		RefreshToken:  sess.RefreshToken,
 		ClientID:      r.Config().AuthClientID,
 		Method:        req.Method,
 		CodeChallenge: challenge,

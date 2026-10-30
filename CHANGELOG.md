@@ -20,11 +20,27 @@ builds with Go 1.27.3**. Nothing about the API, the configuration or the databas
 - **Go 1.27.3** (was 1.27.2), in `go.mod` and as the image's default build toolchain (`ARG GO_VERSION` in the
   `Dockerfile`). Go 1.27.3 fixes GO-2026-6809 in `crypto/x509`, which code making TLS calls reaches. **Rebuild the
   image to pick the fix up.**
+- **The public verify route's abuse-evidence event now names its own request's caller.** The event is posted in
+  the background after the answer has gone out, and it took the caller's address, user agent and correlation id
+  as read off the request, which share a buffer the server reuses for the next request on the connection. An
+  event could therefore reach the audit service carrying another caller's address or user agent, or garbled
+  bytes. The event now holds copies of its own.
+- **Access records and correlation ids keep their own request's values** (`go-gdpr-audit` v1.1.8, `go-platform-kit`
+  v1.11.6). An access record queued while the access audit was unreachable, and the correlation id carried on
+  traces, audit records and background calls, could name another request's document, person or id. Both libraries
+  now keep copies of their own.
+
+### Fixed
+
+- **Development only, without `REDIS_URL`:** the in-memory session store keeps its own copy of each session id and
+  login-flow state it stores. A token refresh stored the session again under the id as read from the cookie,
+  which shares a buffer the server reuses, so the session could end up filed under another value and be lost.
 
 ### Changed
 
-- **Libraries:** azugo → v0.40.1, `fasthttp` → v1.76.0, `pdfcpu` → v0.16.3, `valkey-go` → v1.0.79, `go-jose` →
-  v4.1.6, plus their indirect modules.
+- **Libraries:** azugo → v0.40.2, go-authbyte → v0.32.0, go-docgate → v1.0.6, go-gdpr-audit → v1.1.8,
+  go-platform-kit → v1.11.6, go-sec-events → v1.2.3, go-validation-answer → v1.1.4, `fasthttp` → v1.77.0, `pdfcpu` →
+  v0.16.4, `valkey-go` → v1.0.79, `go-jose` → v4.1.6, plus their indirect modules.
 
 ## v0.3.1
 

@@ -177,16 +177,18 @@ func (r *router) verifyDocument(ctx *azugo.Context) {
 }
 
 // recordVerify emits the abuse-evidence event for one verify request,
-// fire-and-forget.
+// fire-and-forget. The event is posted after the request has ended, while the
+// address, user agent and correlation id are views over the request's buffer,
+// which the server reuses for the next request; so the event takes copies.
 func (r *router) recordVerify(ctx *azugo.Context, ip string, size int64, sha, verdict, sessionID string) {
 	r.VerifyAudit().Record(audit.VerifyEvent{
 		TS:            time.Now().UTC().Format(time.RFC3339),
-		IP:            ip,
-		UserAgent:     ctx.UserAgent(),
+		IP:            strings.Clone(ip),
+		UserAgent:     strings.Clone(ctx.UserAgent()),
 		SizeBytes:     size,
 		SHA256:        sha,
 		Verdict:       verdict,
-		CorrelationID: correlation.FromContext(ctx).CorrelationID,
+		CorrelationID: strings.Clone(correlation.FromContext(ctx).CorrelationID),
 		SessionID:     sessionID,
 	})
 }

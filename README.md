@@ -218,7 +218,7 @@ Standard fleet env (`SERVER_URLS`, `SERVICE_NAME`, `ENVIRONMENT`, `LOG_*`, `OTEL
 |---|---|---|
 | `AUTH_ISSUER_URL` | — (required) | authbyte-core public base — the browser authorization redirect + the trusted token issuer |
 | `AUTH_INTERNAL_URL` | — (⇒ issuer) | In-network authbyte-core address for server-side token/identity/step-up calls + the DPoP proof URL; falls back to the issuer when no proxy sits between them |
-| `AUTH_CLIENT_ID` | `portal-spa` | Public client id presented in the authorization-code flow |
+| `AUTH_CLIENT_ID` | `portal-spa` | The sign-in client the login runs as. It is confidential: it proves itself at the authority with `SERVICE_CLIENT_SECRET` |
 | `AUTH_REDIRECT_URI` | — (required) | Registered callback the browser is returned to after authentication |
 | `POST_LOGIN_URL` | — (required) | Where the browser is sent after a successful login (the SPA entry point); also derives the logout + signing-return origin |
 | `SIGNING_RETURN_BASE_URL` | — (⇒ POST_LOGIN_URL origin) | App origin a redirect-flow signing provider returns the browser to (always BFF-controlled — no open-redirect surface) |
@@ -227,7 +227,7 @@ Standard fleet env (`SERVER_URLS`, `SERVICE_NAME`, `ENVIRONMENT`, `LOG_*`, `OTEL
 | `FLOW_TTL` | `10m` | Window a login may take from start to callback |
 | `COOKIE_NAME` | `portal_session` | Name of the http-only session cookie (the anti-forgery cookie is `portal_csrf`) |
 | `SERVICE_CLIENT_ID` | `svc:portal-api` | Outbound service-client id authenticating the token-exchange requests |
-| `SERVICE_CLIENT_SECRET` | — | Outbound client secret. Secret: supports the `SERVICE_CLIENT_SECRET_FILE` convention (an explicit plain value still overrides it) |
+| `SERVICE_CLIENT_SECRET` | — | Outbound client secret, and the sign-in client's proof at the authority's code exchange, refresh, revocation and step-up (HTTP Basic). Secret: supports the `SERVICE_CLIENT_SECRET_FILE` convention (an explicit plain value still overrides it) |
 | `OUTBOUND_ISSUER_URL` | — (⇒ issuer) | In-network address for the outbound token mint (the trusted issuer stays authbyte-core) |
 | `DOCUMENT_BASE_URL` · `ENVELOPE_BASE_URL` · `SIGNFLOW_BASE_URL` · `PREVIEW_BASE_URL` | — | Collaborator base URLs; each unset ⇒ its routes fail closed with `503 …notConfigured` |
 | `DOCUMENT_AUDIENCE` · `ENVELOPE_AUDIENCE` · `SIGNFLOW_AUDIENCE` · `PREVIEW_AUDIENCE` | `svc:document` · `svc:envelope` · `svc:signflow` · `svc:preview` | Target audience for each collaborator's delegated token |

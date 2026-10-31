@@ -5,6 +5,14 @@ runs the service or integrates against it.
 
 ## v0.3.2
 
+### Changed — the sign-in client proves itself with the service's secret
+
+On `go-authbyte` v0.35.0, the sign-in client (`AUTH_CLIENT_ID`) sends `SERVICE_CLIENT_SECRET` to authbyte by HTTP
+Basic at the code exchange, refresh and revocation, and in the step-up's body. **Run it against authbyte's per-client
+registry, where the sign-in client's row is `type: confidential` with the same secret as the service client's row:**
+authbyte refuses a client that sends a secret its row does not hold, and a confidential row refuses one that sends
+none. The configuration does not change.
+
 A security release. A token exchanged for one sign-in is no longer reused for another, a sign-out no longer puts
 the session's refresh token in the browser's address, and **the service now builds with Go 1.27.3**. Nothing about
 the API, the configuration or the database changes.

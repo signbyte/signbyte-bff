@@ -60,11 +60,14 @@ func (d *routingDoer) DoServiceOnBehalf(_ context.Context, _, _, _, _, method, f
 
 // fakeAccessToken builds an unsigned JWT-shaped token carrying only the
 // serial_number claim asclient.SerialFromToken reads — enough to drive the
-// "which slot is yours" matching without a real Auth Service.
+// "which slot is yours" matching without a real Auth Service. The reader parses
+// it as a token, so its header names an algorithm and its signature segment
+// decodes, as every issued token's do.
 func fakeAccessToken(serial string) string {
 	payload, _ := json.Marshal(map[string]string{"serial_number": serial})
+	enc := base64.RawURLEncoding.EncodeToString
 
-	return "h." + base64.RawURLEncoding.EncodeToString(payload) + ".s"
+	return enc([]byte(`{"alg":"none"}`)) + "." + enc(payload) + ".sig"
 }
 
 // putSession seeds a logged-in session with a far-future token (no refresh) and a

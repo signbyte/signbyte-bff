@@ -50,9 +50,12 @@ the API, the configuration or the database changes.
 
 ### Changed
 
-- **Libraries:** azugo → v0.40.2, go-authbyte → v0.32.0, go-docgate → v1.0.6, go-gdpr-audit → v1.1.8,
+- **The client for authbyte is now `go-authbyte`'s `asclient`.** This service's own copy is gone. Sign-in, refresh,
+  step-up, sign-out and the signing capabilities a sign-in hands over work as before, and the identity code that
+  marks a person's own signer slot is still compared in its one stored spelling.
+- **Libraries:** azugo → v0.40.2, go-authbyte → v0.34.0, go-docgate → v1.0.6, go-gdpr-audit → v1.1.8,
   go-platform-kit → v1.11.6, go-sec-events → v1.2.3, go-validation-answer → v1.1.4, `fasthttp` → v1.77.0, `pdfcpu` →
-  v0.16.4, `valkey-go` → v1.0.79, `go-jose` → v4.1.6, plus their indirect modules.
+  v0.16.4, `valkey-go` → v1.0.79, `go-jose` → v4.1.7, plus their indirect modules.
 
 ## v0.3.1
 

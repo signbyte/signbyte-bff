@@ -173,7 +173,8 @@ func logoutAgainst(t *testing.T, status int) (response.Logout, []revokeCall, boo
 	qt.Assert(t, qt.IsNil(err))
 	claims, err := json.Marshal(map[string]any{"sub": "user-1", "login_method": "eparakstsMobile"})
 	qt.Assert(t, qt.IsNil(err))
-	accessToken := "e30." + base64.RawURLEncoding.EncodeToString(claims) + ".sig"
+	accessToken := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none"}`)) + "." +
+		base64.RawURLEncoding.EncodeToString(claims) + ".sig"
 
 	const sid, csrf = "sid-logout", "csrf-logout"
 	qt.Assert(t, qt.IsNil(app.Sessions().PutSession(context.Background(), sid, &session.Session{

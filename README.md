@@ -124,7 +124,7 @@ flowchart TB
         REDIS["redis.go (prod) · memory.go (dev)<br/>Flow + Session, TTL-bounded"]
     end
 
-    subgraph AS["asclient/ — authbyte-core driver"]
+    subgraph AS["go-authbyte/asclient — authbyte-core driver (library)"]
         DPOP["authorization-code + PKCE + DPoP<br/>token · identity · step-up · Web eID"]
     end
 
@@ -267,7 +267,6 @@ signbyte-bff/
 │   ├── session.go   — Store interface, Flow + Session, key (de)serialization
 │   ├── redis.go     — production store (TTL-bounded, GETDEL single-use flow)
 │   └── memory.go    — in-memory store (development/test)
-├── asclient/                                        — authbyte-core driver (auth-code + PKCE + DPoP + Web eID + step-up)
 ├── clients/                                         — on-behalf composition (token exchange, fail-closed)
 │   ├── clients.go   — doOnBehalf (token exchange, fail-closed)
 │   ├── document.go, envelope.go, signflow.go, preview.go

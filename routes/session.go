@@ -7,9 +7,9 @@ import (
 	"github.com/valyala/fasthttp"
 	"go.uber.org/zap"
 
+	"github.com/gmb-lib/go-authbyte/asclient"
 	pkerrors "github.com/gmb-lib/go-platform-kit/errors"
 
-	"github.com/signbyte/signbyte-bff/asclient"
 	"github.com/signbyte/signbyte-bff/routes/request"
 	"github.com/signbyte/signbyte-bff/routes/response"
 	"github.com/signbyte/signbyte-bff/session"
@@ -322,7 +322,11 @@ func (r *router) logout(ctx *azugo.Context) {
 			}
 		}
 		if redirect := r.Config().LogoutRedirectURI(); redirect != "" {
-			logoutURL = r.AuthService().BrowserLogoutURL(redirect, asclient.LoginMethodFromToken(sess.AccessToken))
+			loginMethod := ""
+			if cl, err := asclient.ParseUnverified(sess.AccessToken); err == nil {
+				loginMethod = cl.LoginMethod
+			}
+			logoutURL = r.AuthService().BrowserLogoutURL(redirect, loginMethod)
 		}
 	}
 

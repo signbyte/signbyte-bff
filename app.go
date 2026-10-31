@@ -24,12 +24,12 @@ import (
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 
+	"github.com/gmb-lib/go-authbyte/asclient"
 	"github.com/gmb-lib/go-authbyte/authclient"
 	"github.com/gmb-lib/go-gdpr-audit/gdpr"
 	"github.com/gmb-lib/go-platform-kit/platform"
 	"github.com/gmb-lib/go-sec-events/secevents"
 
-	"github.com/signbyte/signbyte-bff/asclient"
 	"github.com/signbyte/signbyte-bff/audit"
 	"github.com/signbyte/signbyte-bff/clients"
 	"github.com/signbyte/signbyte-bff/session"

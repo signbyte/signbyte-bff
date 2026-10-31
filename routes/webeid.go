@@ -6,9 +6,9 @@ import (
 	"azugo.io/azugo"
 	"github.com/valyala/fasthttp"
 
+	"github.com/gmb-lib/go-authbyte/asclient"
 	pkerrors "github.com/gmb-lib/go-platform-kit/errors"
 
-	"github.com/signbyte/signbyte-bff/asclient"
 	"github.com/signbyte/signbyte-bff/routes/request"
 	"github.com/signbyte/signbyte-bff/routes/response"
 	"github.com/signbyte/signbyte-bff/session"

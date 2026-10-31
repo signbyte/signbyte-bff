@@ -30,6 +30,11 @@ type Flow struct {
 	// SessionID, when set, marks an elevation of an existing session rather than a
 	// fresh login: the callback updates that session's tokens in place.
 	SessionID string `json:"session_id,omitempty"`
+	// Nonce is the value a sign-in sent the Auth Service and its ID token must
+	// carry back; ACRValues the methods it named. Set for every sign-in, never for
+	// an elevation, which answers no ID token.
+	Nonce     string `json:"nonce,omitempty"`
+	ACRValues string `json:"acr_values,omitempty"`
 }
 
 // Session is a logged-in browser session held server-side. The cookie carries

@@ -8,8 +8,8 @@ import (
 )
 
 // LoginStart begins a login. ACRValues optionally asks the Auth Service to force
-// a specific login method (the app supplies the method-specific value); empty
-// lets the Auth Service present its default chooser.
+// a specific login method, in its own method names (eparakstsMobile, eidScan);
+// empty lets the Auth Service present its default chooser.
 type LoginStart struct {
 	ACRValues string `json:"acr_values,omitempty"`
 }

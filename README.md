@@ -162,16 +162,18 @@ sequenceDiagram
     participant U as access-audit
 
     B->>P: POST /login/start
-    P->>P: mint per-session key + PKCE verifier + state
-    P->>R: PutFlow(state → {key, verifier})
+    P->>P: mint per-session key + PKCE verifier + state + nonce
+    P->>R: PutFlow(state → {key, verifier, nonce})
     P-->>B: {authorize_url, state}
 
-    B->>A: follow authorize_url (prompt=login)
-    A-->>B: redirect to /login/callback?code&state
-    B->>P: GET /login/callback?code&state
+    B->>A: follow authorize_url (scope=openid, nonce)
+    A-->>B: redirect to /login/callback?code&state&iss
+    B->>P: GET /login/callback?code&state&iss
+    P->>P: iss must be the authority's issuer
     P->>R: TakeFlow(state) — single use
     P->>A: POST /token (code + PKCE) + DPoP(key)
-    A-->>P: access + refresh token (bound to key)
+    A-->>P: access + refresh + ID token (bound to key)
+    P->>P: check the ID token (issuer, audience, signature, nonce, method)
     P->>R: PutSession(sid → {key, tokens, subject, csrf})
     P-->>B: Set-Cookie sid (http-only) + csrf (readable)<br/> redirect to SPA
 
@@ -191,7 +193,7 @@ sequenceDiagram
 
 **To the browser** the service hands two cookies and nothing else. `portal_session` is an opaque, http-only session id — never a token, so script cannot read it and it cannot be replayed as a bearer credential. `portal_csrf` carries a per-session anti-forgery token that is deliberately **readable** by the SPA, which echoes it in `X-CSRF-Token` on every state-changing call; the handler compares it to the value minted for that session and rejects a mismatch (`403 err:session:csrf`). Both cookies are `SameSite=Lax`, `Secure` over TLS, and site-scoped — the layered defence of the [BFF pattern](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-browser-based-apps) against cross-site request forgery on a cookie session.
 
-**Server-side** each session holds the per-session **sender-constraint key** (a freshly generated EC key, PKCS#8-serialized), the access/refresh tokens, the person's subject, the anti-forgery token, for a card login the card's authentication certificate captured at login, and — when the auth service captured one — the login's signing-capability set (sign identity, certificates, seals), stored on the code exchange, kept across refreshes, replaced on step-up, gone on logout. The capability certificates carry personal data: they stay server-side and are never logged. Every call `signbyte-bff` makes to authbyte-core (token, identity, step-up, revoke) carries a fresh [DPoP (RFC 9449)](https://www.rfc-editor.org/rfc/rfc9449) proof of possession of that key, retrying once on a server-issued nonce; the tokens are therefore useless without the key, and the key never leaves the server. Login uses the OpenID Connect authorization-code flow with [PKCE (RFC 7636)](https://www.rfc-editor.org/rfc/rfc7636) `S256`, and always sends `prompt=login` so a lingering upstream SSO session cannot silently answer with a different login method than the one requested (the login method binds which signing flows are permitted).
+**Server-side** each session holds the per-session **sender-constraint key** (a freshly generated EC key, PKCS#8-serialized), the access/refresh tokens, the person's subject, the anti-forgery token, for a card login the card's authentication certificate captured at login, and — when the auth service captured one — the login's signing-capability set (sign identity, certificates, seals), stored on the code exchange, kept across refreshes, replaced on step-up, gone on logout. The capability certificates carry personal data: they stay server-side and are never logged. Every call `signbyte-bff` makes to authbyte-core (token, identity, step-up, revoke) carries a fresh [DPoP (RFC 9449)](https://www.rfc-editor.org/rfc/rfc9449) proof of possession of that key, retrying once on a server-issued nonce; the tokens are therefore useless without the key, and the key never leaves the server. Login uses the OpenID Connect authorization-code flow with [PKCE (RFC 7636)](https://www.rfc-editor.org/rfc/rfc7636) `S256` and asks for an ID token with a nonce kept with the parked flow. The browser's return must name the authority's issuer ([RFC 9207](https://www.rfc-editor.org/rfc/rfc9207)), or its code is never redeemed; a sign-in establishes a session only when its ID token passes go-authbyte's check (issuer, this client alone, signature, the nonce, and a method among the ones asked for). A step-up answers no ID token and is redeemed as before. The method asked for (`acr_values` on `/login/start`) is named in the authority's own method names, `eparakstsMobile` or `eidScan`, and the authority refuses a sign-in completed with another one (the login method binds which signing flows are permitted).
 
 **To reach a domain service** the handler exchanges the user's access token for a downstream token that carries the *user's* identity, via [OAuth 2.0 Token Exchange (RFC 8693)](https://www.rfc-editor.org/rfc/rfc8693). document-store, envelope, signflow, and previewbyte each owner-filter on that delegated subject, so the user's own data is reachable and no cross-user access is possible. A call with no subject token does not fall back to this service's identity — it fails closed. The delegated token is cached by the authentication library, keyed on a fingerprint of the user's own token, never on the person alone: a delegated token bakes in the claims of the token it was exchanged for (the login method, the assurance level, the organisation), so a re-login with a *different* method gets a fresh exchange instead of a token carrying the *old* method, which signflow's login-to-flow binding check would reject. A cached token is not reused once the user's token has expired.
 
@@ -217,6 +219,7 @@ Standard fleet env (`SERVER_URLS`, `SERVICE_NAME`, `ENVIRONMENT`, `LOG_*`, `OTEL
 | Env var | Default | Meaning |
 |---|---|---|
 | `AUTH_ISSUER_URL` | — (required) | authbyte-core public base — the browser authorization redirect + the trusted token issuer |
+| `AUTH_ISSUER` | — (⇒ `AUTH_ISSUER_URL`) | authbyte's issuer identifier, exactly as its discovery document states it: a sign-in's return (`iss`) and its ID token must name it. Set it only where the browser reaches authbyte at another address than its issuer |
 | `AUTH_INTERNAL_URL` | — (⇒ issuer) | In-network authbyte-core address for server-side token/identity/step-up calls + the DPoP proof URL; falls back to the issuer when no proxy sits between them |
 | `AUTH_CLIENT_ID` | `portal-spa` | The sign-in client the login runs as. It is confidential: it proves itself at the authority with `SERVICE_CLIENT_SECRET` |
 | `AUTH_REDIRECT_URI` | — (required) | Registered callback the browser is returned to after authentication |

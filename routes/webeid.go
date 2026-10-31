@@ -2,6 +2,7 @@ package routes
 
 import (
 	"encoding/json"
+	"errors"
 
 	"azugo.io/azugo"
 	"github.com/valyala/fasthttp"
@@ -13,6 +14,10 @@ import (
 	"github.com/signbyte/signbyte-bff/routes/response"
 	"github.com/signbyte/signbyte-bff/session"
 )
+
+// errNotACardSignIn is a parked elevation presented to the card sign-in's
+// completion, which only ever completes a sign-in.
+var errNotACardSignIn = errors.New("the flow is an elevation, not a card sign-in")
 
 // loginWebEIDStart begins an eID-card login. Unlike the redirect methods there is
 // no browser navigation: this mints the per-session key + proof-key, asks the Auth
@@ -49,8 +54,14 @@ func (r *router) loginWebEIDStart(ctx *azugo.Context) {
 
 		return
 	}
+	idNonce, err := asclient.RandomToken(24)
+	if err != nil {
+		r.fail(ctx, err)
 
-	nonce, flow, err := r.AuthService().WebEIDChallenge(ctx, challenge, spaState)
+		return
+	}
+
+	nonce, flow, err := r.AuthService().WebEIDChallengeWithNonce(ctx, challenge, spaState, idNonce)
 	if err != nil {
 		ctx.Log().Warn("web eid challenge failed")
 		ctx.Error(pkerrors.NewProblem("err:upstream:unavailable",
@@ -60,8 +71,8 @@ func (r *router) loginWebEIDStart(ctx *azugo.Context) {
 	}
 
 	// Park the flow under the Auth Service's handle so the completion can redeem it
-	// with the same key the issued token will be bound to.
-	if err := r.Sessions().PutFlow(ctx, flow, &session.Flow{Key: keyEnc, Verifier: verifier}); err != nil {
+	// with the same key the issued token will be bound to, and check its ID token.
+	if err := r.Sessions().PutFlow(ctx, flow, &session.Flow{Key: keyEnc, Verifier: verifier, Nonce: idNonce}); err != nil {
 		r.fail(ctx, err)
 
 		return
@@ -88,6 +99,10 @@ func (r *router) loginWebEIDComplete(ctx *azugo.Context) {
 	}
 
 	flow, err := r.Sessions().TakeFlow(ctx, req.State)
+	if err == nil && flow.SessionID != "" {
+		// An elevation completes through the login callback, never here.
+		err = errNotACardSignIn
+	}
 	if err != nil {
 		ctx.Error(pkerrors.NewProblem("err:session:flowExpired",
 			pkerrors.WithStatus(fasthttp.StatusBadRequest),
@@ -112,7 +127,7 @@ func (r *router) loginWebEIDComplete(ctx *azugo.Context) {
 		return
 	}
 
-	tokens, err := r.AuthService().ExchangeCode(ctx, key, code, flow.Verifier)
+	tokens, err := r.exchangeFlow(ctx, key, code, flow)
 	if err != nil {
 		ctx.Log().Warn("token exchange failed")
 		ctx.Error(pkerrors.NewProblem("err:upstream:unavailable",

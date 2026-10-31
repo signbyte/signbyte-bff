@@ -169,9 +169,9 @@ func (a *App) init() error {
 
 	// The upstream Auth Service client: the browser login + token + identity flow.
 	// Its sign-in client is confidential and proves itself with this edge's own
-	// service secret.
+	// service secret; a sign-in's return and its ID token must name the issuer.
 	a.as = asclient.New(cfg.IssuerURL(), cfg.InternalURL(), cfg.AuthClientID, cfg.AuthRedirectURI,
-		asclient.WithClientSecret(cfg.ServiceClientSecret))
+		asclient.WithClientSecret(cfg.ServiceClientSecret), asclient.WithIssuer(cfg.SignInIssuer()))
 
 	// Outbound delegated-token client — mints downstream tokens carrying the user's
 	// identity for the composed service calls. Built only when at least one

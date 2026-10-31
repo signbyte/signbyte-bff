@@ -101,7 +101,7 @@ func TestLoginCallbackIdPErrorMarker(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			resp, err := app.TestClient().Get("/api/portal/v1/login/callback?error=" + c.idpErr)
+			resp, err := app.TestClient().Get("/api/portal/v1/login/callback?error=" + c.idpErr + "&iss=" + url.QueryEscape(testIssuer))
 			qt.Assert(t, qt.IsNil(err))
 			qt.Assert(t, qt.Equals(resp.StatusCode(), fasthttp.StatusFound))
 			loc := string(resp.Header.Peek("Location"))
@@ -111,15 +111,22 @@ func TestLoginCallbackIdPErrorMarker(t *testing.T) {
 	}
 }
 
+// testIssuer is the Auth Service's issuer in the test configuration.
+const testIssuer = "http://localhost:8080"
+
 // TestLoginStart proves the login can be initiated through the BFF without the
 // browser ever holding a token: it returns an authorization URL for the upstream
-// Auth Service and an opaque state. No upstream call is made yet.
+// Auth Service and an opaque state. No upstream call is made yet. The sign-in
+// asks for an ID token with a nonce kept only with its parked flow, and names
+// the method asked for in the Auth Service's own names.
 func TestLoginStart(t *testing.T) {
-	app := testApp(t)
-	app.Start(t)
-	defer app.Stop()
+	app := api.TestApp(t)
+	qt.Assert(t, qt.IsNil(Init(app)))
+	ta := azugo.NewTestApp(app.App)
+	ta.Start(t)
+	defer ta.Stop()
 
-	resp, err := app.TestClient().Post("/api/portal/v1/login/start", []byte("{}"))
+	resp, err := ta.TestClient().Post("/api/portal/v1/login/start", []byte(`{"acr_values":"eidScan"}`))
 	qt.Assert(t, qt.IsNil(err))
 	qt.Assert(t, qt.Equals(resp.StatusCode(), fasthttp.StatusOK))
 
@@ -131,11 +138,157 @@ func TestLoginStart(t *testing.T) {
 	qt.Assert(t, qt.IsNil(json.Unmarshal(buf, &out)))
 	qt.Assert(t, qt.IsTrue(out.State != ""))
 	qt.Assert(t, qt.IsTrue(strings.Contains(out.AuthorizeURL, "/authorize?")))
-	qt.Assert(t, qt.IsTrue(strings.Contains(out.AuthorizeURL, "code_challenge=")))
-	qt.Assert(t, qt.IsTrue(strings.Contains(out.AuthorizeURL, "client_id=portal-spa")))
-	// Forces a fresh authentication so the IdP cannot answer from a lingering SSO
-	// session and return a different login method than the one requested.
-	qt.Assert(t, qt.IsTrue(strings.Contains(out.AuthorizeURL, "prompt=login")))
+	u, err := url.Parse(out.AuthorizeURL)
+	qt.Assert(t, qt.IsNil(err))
+	q := u.Query()
+	qt.Check(t, qt.Not(qt.Equals(q.Get("code_challenge"), "")))
+	qt.Check(t, qt.Equals(q.Get("client_id"), "portal-spa"))
+	qt.Check(t, qt.Equals(q.Get("scope"), "openid"))
+	qt.Check(t, qt.Equals(q.Get("acr_values"), "eidScan"))
+	qt.Check(t, qt.IsFalse(q.Has("prompt")))
+
+	flow, err := app.Sessions().TakeFlow(context.Background(), out.State)
+	qt.Assert(t, qt.IsNil(err))
+	qt.Check(t, qt.Not(qt.Equals(flow.Nonce, "")))
+	qt.Check(t, qt.Equals(q.Get("nonce"), flow.Nonce))
+	qt.Check(t, qt.Equals(flow.ACRValues, "eidScan"))
+
+	for _, bad := range []string{"urn:eparaksts:authentication:flow:mobileid", strings.Repeat("a", 65), "eidScan  webEid"} {
+		body, err := json.Marshal(map[string]string{"acr_values": bad})
+		qt.Assert(t, qt.IsNil(err))
+		resp, err := ta.TestClient().Post("/api/portal/v1/login/start", body)
+		qt.Assert(t, qt.IsNil(err))
+		qt.Check(t, qt.Equals(resp.StatusCode(), fasthttp.StatusBadRequest), qt.Commentf("%q", bad))
+		fasthttp.ReleaseResponse(resp)
+	}
+}
+
+// tokenCall counts what the Auth Service stand-in received at /token and /revoke.
+type tokenCall struct {
+	token, revoke int
+	revoked       string
+}
+
+// callbackApp starts the BFF against an Auth Service that answers /token with
+// tokenBody (no ID token unless the body has one) and counts /revoke.
+func callbackApp(t *testing.T, tokenBody string) (*api.App, *azugo.TestApp, *tokenCall) {
+	t.Helper()
+
+	calls := &tokenCall{}
+	as := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/token":
+			calls.token++
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(tokenBody))
+		case "/revoke":
+			_ = r.ParseForm()
+			calls.revoke++
+			calls.revoked = r.PostForm.Get("token")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(as.Close)
+	t.Setenv("AUTH_INTERNAL_URL", as.URL)
+
+	app := api.TestApp(t)
+	qt.Assert(t, qt.IsNil(Init(app)))
+	ta := azugo.NewTestApp(app.App)
+	ta.Start(t)
+	t.Cleanup(ta.Stop)
+
+	return app, ta, calls
+}
+
+// parkFlow parks a flow under state with a fresh key.
+func parkFlow(t *testing.T, app *api.App, state string, flow session.Flow) {
+	t.Helper()
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	qt.Assert(t, qt.IsNil(err))
+	flow.Key, err = session.MarshalKey(key)
+	qt.Assert(t, qt.IsNil(err))
+	flow.Verifier = "verifier-1"
+	qt.Assert(t, qt.IsNil(app.Sessions().PutFlow(context.Background(), state, &flow)))
+}
+
+// callback lands a return at the callback and answers where the browser is sent.
+func callback(t *testing.T, ta *azugo.TestApp, query string) string {
+	t.Helper()
+
+	resp, err := ta.TestClient().Get("/api/portal/v1/login/callback?" + query)
+	qt.Assert(t, qt.IsNil(err))
+	qt.Assert(t, qt.Equals(resp.StatusCode(), fasthttp.StatusFound))
+	loc := string(resp.Header.Peek("Location"))
+	fasthttp.ReleaseResponse(resp)
+
+	return loc
+}
+
+// A return that does not name the Auth Service's issuer is not its answer: its
+// code is never redeemed, its error is not read as the Auth Service's, and the
+// flow it names is left as it was [RFC 9207 §2.4].
+func TestLoginCallbackRefusesAReturnNotNamingTheIssuer(t *testing.T) {
+	app, ta, calls := callbackApp(t, `{}`)
+	parkFlow(t, app, "state-1", session.Flow{Nonce: "nonce-1"})
+
+	for _, query := range []string{
+		"code=c1&state=state-1",
+		"code=c1&state=state-1&iss=" + url.QueryEscape("https://another.example"),
+		"error=access_denied&state=state-1&iss=" + url.QueryEscape("https://another.example"),
+	} {
+		qt.Check(t, qt.IsTrue(strings.Contains(callback(t, ta, query), "error=login_failed")), qt.Commentf("%s", query))
+	}
+	qt.Check(t, qt.Equals(calls.token, 0))
+
+	_, err := app.Sessions().TakeFlow(context.Background(), "state-1")
+	qt.Check(t, qt.IsNil(err))
+}
+
+// A sign-in redeemed with no ID token in the answer establishes no session, and
+// the session the exchange opened at the Auth Service is ended. An elevation of a
+// session answers none, and is redeemed as before.
+func TestASignInIsRedeemedOnlyWithItsIDToken(t *testing.T) {
+	claims := base64.RawURLEncoding.EncodeToString([]byte(`{"sub":"user-1","login_method":"eparakstsMobile"}`))
+	accessToken := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none"}`)) + "." + claims + ".sig"
+	app, ta, calls := callbackApp(t, `{"access_token":"`+accessToken+`","token_type":"DPoP","expires_in":300,"refresh_token":"refresh-1"}`)
+	iss := "&iss=" + url.QueryEscape(testIssuer)
+
+	parkFlow(t, app, "state-sign-in", session.Flow{Nonce: "nonce-1", ACRValues: "eparakstsMobile"})
+	resp, err := ta.TestClient().Get("/api/portal/v1/login/callback?code=c1&state=state-sign-in" + iss)
+	qt.Assert(t, qt.IsNil(err))
+	qt.Check(t, qt.IsTrue(strings.Contains(string(resp.Header.Peek("Location")), "error=login_failed")))
+	qt.Check(t, qt.IsFalse(strings.Contains(string(resp.Header.Peek("Set-Cookie")), "portal_session=")))
+	fasthttp.ReleaseResponse(resp)
+	qt.Check(t, qt.Equals(calls.token, 1))
+	qt.Check(t, qt.Equals(calls.revoke, 1))
+	qt.Check(t, qt.Equals(calls.revoked, "refresh-1"))
+
+	const sid = "sid-elevated"
+	qt.Assert(t, qt.IsNil(app.Sessions().PutSession(context.Background(), sid, &session.Session{
+		Subject: "user-1", AccessToken: "old", AccessExpiry: 1 << 62, CSRF: "csrf-1", RefreshToken: "refresh-0",
+	})))
+	parkFlow(t, app, "state-step-up", session.Flow{SessionID: sid})
+	loc := callback(t, ta, "code=c2&state=state-step-up"+iss)
+	qt.Check(t, qt.IsFalse(strings.Contains(loc, "error=")))
+	sess, err := app.Sessions().GetSession(context.Background(), sid)
+	qt.Assert(t, qt.IsNil(err))
+	qt.Check(t, qt.Equals(sess.RefreshToken, "refresh-1"))
+
+	// A sign-in parked without a nonce (an earlier release's) is not redeemed
+	// at all: no ID token could prove it.
+	calls.token = 0
+	parkFlow(t, app, "state-no-nonce", session.Flow{})
+	qt.Check(t, qt.IsTrue(strings.Contains(callback(t, ta, "code=c3&state=state-no-nonce"+iss), "error=login_failed")))
+	qt.Check(t, qt.Equals(calls.token, 0))
+
+	// The card sign-in's completion completes sign-ins only, never an elevation.
+	parkFlow(t, app, "state-card-elevation", session.Flow{SessionID: sid})
+	resp, err = ta.TestClient().Post("/api/portal/v1/login/webeid/complete", []byte(`{"state":"state-card-elevation","authToken":{"x":1}}`))
+	qt.Assert(t, qt.IsNil(err))
+	qt.Check(t, qt.Equals(resp.StatusCode(), fasthttp.StatusBadRequest))
+	fasthttp.ReleaseResponse(resp)
 }
 
 // revokeCall is one sign-out the Auth Service stand-in received.

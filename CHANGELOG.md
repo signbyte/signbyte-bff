@@ -5,6 +5,22 @@ runs the service or integrates against it.
 
 ## v0.3.2
 
+### Changed — a sign-in is proven by its ID token
+
+On `go-authbyte` v0.36.0, every sign-in, by redirect and by card, asks authbyte for an ID token with a nonce kept with
+the parked flow, and establishes a session only when that ID token passes the library's check: authbyte's issuer, this
+client as its only audience, authbyte's signature, the nonce, and a method among the ones asked for. A sign-in that
+fails it ends the session authbyte opened: a redirect sign-in lands on the app with `error=login_failed`, a card
+sign-in's completion answers `502 err:upstream:unavailable`. The browser's return must
+name authbyte's issuer (`iss`, RFC 9207) or its code is never redeemed and its error is not read. A step-up answers no
+ID token and is redeemed as before. The login no longer sends `prompt=login`: authbyte refuses a sign-in completed with
+a method the request did not name, which is what the parameter was there for.
+
+**`acr_values` on `POST /api/portal/v1/login/start` takes authbyte's method names**, `eparakstsMobile` or `eidScan`,
+no longer the provider's codes. **Needs an authbyte that issues ID tokens and names its issuer in its returns**; the
+issuer checked is `AUTH_ISSUER_URL`, unless the new optional `AUTH_ISSUER` names it, for a deployment where the
+browser reaches authbyte at another address than its issuer.
+
 ### Changed — the sign-in client proves itself with the service's secret
 
 On `go-authbyte` v0.35.0, the sign-in client (`AUTH_CLIENT_ID`) sends `SERVICE_CLIENT_SECRET` to authbyte by HTTP

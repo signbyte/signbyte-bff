@@ -1,6 +1,8 @@
 package routes
 
 import (
+	"crypto/ecdsa"
+	"regexp"
 	"time"
 
 	"azugo.io/azugo"
@@ -14,6 +16,10 @@ import (
 	"github.com/signbyte/signbyte-bff/routes/response"
 	"github.com/signbyte/signbyte-bff/session"
 )
+
+// methodNames is acr_values as this service passes it on: one sign-in method's
+// name, or a few separated by single spaces.
+var methodNames = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]{0,63}( [A-Za-z][A-Za-z0-9]{0,63}){0,7}$`)
 
 // refreshLeeway refreshes the access token this long before it expires.
 const refreshLeeway = 30 * time.Second
@@ -38,6 +44,13 @@ func (r *router) loginStart(ctx *azugo.Context) {
 
 			return
 		}
+	}
+	if req.ACRValues != "" && !methodNames.MatchString(req.ACRValues) {
+		ctx.Error(pkerrors.NewProblem("err:request:invalid",
+			pkerrors.WithStatus(fasthttp.StatusBadRequest),
+			pkerrors.WithDetail("acr_values is not a list of sign-in method names")))
+
+		return
 	}
 
 	key, err := asclient.GenerateKey()
@@ -65,16 +78,28 @@ func (r *router) loginStart(ctx *azugo.Context) {
 
 		return
 	}
+	nonce, err := asclient.RandomToken(24)
+	if err != nil {
+		r.fail(ctx, err)
 
-	if err := r.Sessions().PutFlow(ctx, state, &session.Flow{Key: keyEnc, Verifier: verifier}); err != nil {
+		return
+	}
+
+	flow := &session.Flow{Key: keyEnc, Verifier: verifier, Nonce: nonce, ACRValues: req.ACRValues}
+	if err := r.Sessions().PutFlow(ctx, state, flow); err != nil {
 		r.fail(ctx, err)
 
 		return
 	}
 
 	ctx.JSON(&response.LoginStart{
-		AuthorizeURL: r.AuthService().AuthorizeURL(challenge, state, req.ACRValues),
-		State:        state,
+		AuthorizeURL: r.AuthService().AuthorizationURL(asclient.AuthorizationRequest{
+			CodeChallenge: challenge,
+			State:         state,
+			Nonce:         nonce,
+			ACRValues:     req.ACRValues,
+		}),
+		State: state,
 	})
 }
 
@@ -87,6 +112,19 @@ func (r *router) loginStart(ctx *azugo.Context) {
 // @title Login callback
 // @route /api/portal/v1/login/callback [get].
 func (r *router) loginCallback(ctx *azugo.Context) {
+	// A return that does not name the Auth Service's issuer is not its answer:
+	// neither its error nor its code is used.
+	iss := ""
+	if v := ctx.Query.StringOptional("iss"); v != nil {
+		iss = *v
+	}
+	if err := r.AuthService().CheckIssuer(iss); err != nil {
+		ctx.Log().Warn("login return does not name the auth service's issuer")
+		r.redirectWithError(ctx, "login_failed")
+
+		return
+	}
+
 	// The Auth Service propagates an IdP error here instead of a code. Map the
 	// known OAuth2 error code to a fixed marker so the SPA can distinguish a
 	// genuine user cancel from a provider-side failure; unknown codes default to
@@ -125,7 +163,7 @@ func (r *router) loginCallback(ctx *azugo.Context) {
 		return
 	}
 
-	tokens, err := r.AuthService().ExchangeCode(ctx, key, *code, flow.Verifier)
+	tokens, err := r.exchangeFlow(ctx, key, *code, flow)
 	if err != nil {
 		ctx.Log().Warn("token exchange failed")
 		r.redirectWithError(ctx, "login_failed")
@@ -169,6 +207,23 @@ func (r *router) loginCallback(ctx *azugo.Context) {
 	ctx.StatusCode(fasthttp.StatusFound)
 	// PostLoginURL is the SPA origin (cross-origin) — bypass same-origin sanitizing.
 	ctx.RedirectUnsafe(r.Config().PostLoginURL)
+}
+
+// exchangeFlow redeems a parked flow's authorization code. An elevation of a
+// session answers no ID token and is redeemed as it is; every other flow is a
+// sign-in, whose answer must carry an ID token proving it (its nonce, a method
+// it named), or no tokens are returned — a sign-in parked without a nonce
+// included.
+func (r *router) exchangeFlow(ctx *azugo.Context, key *ecdsa.PrivateKey, code string, flow *session.Flow) (*asclient.Tokens, error) {
+	if flow.SessionID != "" {
+		return r.AuthService().ExchangeCode(ctx, key, code, flow.Verifier)
+	}
+	tokens, _, err := r.AuthService().ExchangeSignIn(ctx, key, code, flow.Verifier, asclient.IDTokenCheck{
+		Nonce:     flow.Nonce,
+		ACRValues: flow.ACRValues,
+	})
+
+	return tokens, err
 }
 
 // establishSession mints a new cookie session from a freshly issued token set,

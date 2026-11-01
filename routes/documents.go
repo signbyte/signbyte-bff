@@ -279,15 +279,11 @@ func (r *router) archiveTimestamp(ctx *azugo.Context) {
 	}
 
 	// The timestamp request is made in the acting user's name: their
-	// authentication certificate rides along — the login-captured one, or the
-	// card login's for an eID-card session.
+	// authentication certificate rides along, the one the sign-in captured (the
+	// card's own for a card sign-in).
 	authCert := ""
-	if _, sess := sessionFromCtx(ctx); sess != nil {
-		if sess.Capabilities != nil && sess.Capabilities.AuthCertificate != "" {
-			authCert = sess.Capabilities.AuthCertificate
-		} else {
-			authCert = sess.SigningAuthCert
-		}
+	if _, sess := sessionFromCtx(ctx); sess != nil && sess.Capabilities != nil {
+		authCert = sess.Capabilities.AuthCertificate
 	}
 	// No captured certificate on this session (an older session, a lost cache,
 	// a login whose capture failed): the fallback is to CAPTURE one — the app

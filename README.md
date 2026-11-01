@@ -52,10 +52,8 @@ Base path `/api/portal/v1`. The session is a cookie: **anonymous** endpoints est
 |---|---|---|
 | `GET /healthz` | — | Liveness — 200 whenever the process is up |
 | `GET /readyz` | — | Readiness — pings the session store; 503 `not_ready` when it is unreachable |
-| `POST /api/portal/v1/login/start` | anonymous | Begin a redirect login: mint the per-session key + PKCE verifier + state, park them bound to this browser (the `portal_signin` cookie), return `{authorize_url, state}`; the address asks authbyte for a fresh sign-in (`prompt=login`, `max_age=0`) |
+| `POST /api/portal/v1/login/start` | anonymous | Begin a login, every way the same (the card too, `acr_values=webEid`: authbyte reads it on its own sign-in page): mint the per-session key + PKCE verifier + state, park them bound to this browser (the `portal_signin` cookie), return `{authorize_url, state}`; the address asks authbyte for a fresh sign-in (`prompt=login`, `max_age=0`) |
 | `GET /api/portal/v1/login/callback` | anonymous | Land the browser back — only the browser that started the sign-in, else the `expired` marker — redeem the code for a key-bound token, set the session cookie, redirect to the SPA |
-| `POST /api/portal/v1/login/webeid/start` | anonymous | Begin an eID-card login: mint the key + verifier, request a card challenge, park the flow bound to this browser, return `{nonce, state}` |
-| `POST /api/portal/v1/login/webeid/complete` | anonymous | From the browser that fetched the challenge only (else `400 err:session:flowExpired`): redeem the card token (signed in the browser) for a key-bound token, establish the session, return `{ok}` |
 | `GET /api/portal/v1/me` | session | The user's identity + permitted signing flows (composed from authbyte-core, narrowed to the flows the signing service runs — see `SIGNER_FLOWS_TTL`), plus seal availability when the login captured it: `can_eseal` (null = unknown, false = verifiably none) and `seals[{id,label}]` for the picker — certificates never reach the browser |
 | `POST /api/portal/v1/session/refresh` | session + CSRF | Re-issue the access token within the session |
 | `POST /api/portal/v1/logout` | session + CSRF | End the session at authbyte-core server to server (`POST /revoke` with the refresh token and the session key), invalidate the session, clear the cookies, return the front-channel logout URL — which names no session, only the client, the landing address and the login method |
@@ -66,7 +64,7 @@ Base path `/api/portal/v1`. The session is a cookie: **anonymous** endpoints est
 | `GET /api/portal/v1/documents/{id}` | session | Document metadata (the user's own) |
 | `GET /api/portal/v1/documents/{id}/chain` | session | One document **chain** as its live head, by any id in it: signed-ness (`hasSignatures` / `platformSigned`), preservation class, retention, the download freeze, and the head container's inner files. The document screen's source of truth — the dashboard listing represents a covered chain by its envelope and pages, so a screen must not take a chain's own facts from there |
 | `GET /api/portal/v1/documents/{id}/download` | session | Stream the bytes (content type + filename relayed); records a GDPR access event |
-| `POST /api/portal/v1/documents/{id}/archive-timestamp` | session + CSRF | Refresh the user's signed document with a qualified archive timestamp (B-LT → B-LTA) via the orchestrator; the document keeps its id. The session's auth certificate (login-captured, or the card login's) rides along — the timestamp request is made in the acting user's name |
+| `POST /api/portal/v1/documents/{id}/archive-timestamp` | session + CSRF | Refresh the user's signed document with a qualified archive timestamp (B-LT → B-LTA) via the orchestrator; the document keeps its id. The session's auth certificate (the one the sign-in captured; a card sign-in's is the card's) rides along — the timestamp request is made in the acting user's name |
 | `POST /api/portal/v1/documents/{id}/validate` | session + CSRF | Validate a signed document on demand (e.g. a file uploaded already signed) → the normalized answer; nothing persisted |
 | `POST /api/portal/v1/documents/bundle` | session + CSRF | Eager-bundle the staged loose uploads into ONE unsigned ASiC-E (the draft-save commit point) `{sourceIds[]}` in order → the bundle row; the loose sources are absorbed |
 | `POST /api/portal/v1/documents/{id}/rebundle` | session + CSRF | Rebuild an unsigned bundle from `{entries[]}` in final order (an existing inner file by name, or a newly staged source by id) — a draft edit (add / remove / reorder) |
@@ -113,7 +111,7 @@ flowchart TB
     end
 
     subgraph Routes["routes/ — HTTP handlers (the SPA talks only here)"]
-        SESS["session.go · webeid.go<br/>login · callback · me · refresh · logout · step-up"]
+        SESS["session.go<br/>login · callback · me · refresh · logout · step-up"]
         DOCS["documents.go · preview.go"]
         SIGN["signing.go"]
         ENVL["envelope.go"]
@@ -150,7 +148,7 @@ flowchart TB
 
 ## Login → cookie session → on-behalf composed call
 
-A redirect login, then an upload composed on the user's behalf. The eID-card login differs only at the front: the card handshake runs in the browser and completes over `webeid/complete` rather than a browser navigation, but redeems the same key-bound token.
+A redirect login, then an upload composed on the user's behalf. A card sign-in is the same redirect login: authbyte reads the card on its own sign-in page, and the browser comes back to the callback with a code.
 
 ```mermaid
 sequenceDiagram
@@ -195,7 +193,7 @@ sequenceDiagram
 
 **Every cookie is `__Host-` wherever it is `Secure`, and read by that exact name.** Over TLS (as the trusted proxy reports it) and in every environment but `development`, the session, the anti-forgery and the sign-in binding cookies are `Secure`, `Path=/`, without a Domain, and named `__Host-portal_session`, `__Host-portal_csrf` and `__Host-portal_signin`; a browser keeps such a cookie only when this host set it so, so no other host and no plain-HTTP answer can plant or overwrite one. Each is read under that one name, never under another: a page on a sibling host, or anyone on the network path, can set a `__Secure-` or plain-named copy for this host, and it is never taken for the real one. Only a `development` edge reached over plain HTTP (the test overlays) uses the plain names. Set `COOKIE_NAME` without a prefix; the service adds it.
 
-**Server-side** each session holds the per-session **sender-constraint key** (a freshly generated EC key, PKCS#8-serialized), the access/refresh tokens, the person's subject, the anti-forgery token, for a card login the card's authentication certificate captured at login, and — when the auth service captured one — the login's signing-capability set (sign identity, certificates, seals), stored on the code exchange, kept across refreshes, replaced on step-up, gone on logout. The capability certificates carry personal data: they stay server-side and are never logged. Every call `signbyte-bff` makes to authbyte-core (token, identity, step-up, revoke) carries a fresh [DPoP (RFC 9449)](https://www.rfc-editor.org/rfc/rfc9449) proof of possession of that key, retrying once on a server-issued nonce; the tokens are therefore useless without the key, and the key never leaves the server. Login uses the OpenID Connect authorization-code flow with [PKCE (RFC 7636)](https://www.rfc-editor.org/rfc/rfc7636) `S256` and asks for an ID token with a nonce kept with the parked flow. The browser's return must name the authority's issuer ([RFC 9207](https://www.rfc-editor.org/rfc/rfc9207)), or its code is never redeemed; a sign-in establishes a session only when its ID token passes go-authbyte's check (issuer, this client alone, signature, the nonce, and a method among the ones asked for). A step-up answers no ID token and is redeemed as before. The method asked for (`acr_values` on `/login/start`) is named in the authority's own method names, `eparakstsMobile` or `eidScan`, and the authority refuses a sign-in completed with another one (the login method binds which signing flows are permitted).
+**Server-side** each session holds the per-session **sender-constraint key** (a freshly generated EC key, PKCS#8-serialized), the access/refresh tokens, the person's subject, the anti-forgery token, and — when the auth service captured one — the login's signing-capability set (sign identity, certificates, seals; a card sign-in's carries the card's authentication certificate, which card signing reuses), stored on the code exchange, kept across refreshes, replaced on step-up, gone on logout. The capability certificates carry personal data: they stay server-side and are never logged. Every call `signbyte-bff` makes to authbyte-core (token, identity, step-up, revoke) carries a fresh [DPoP (RFC 9449)](https://www.rfc-editor.org/rfc/rfc9449) proof of possession of that key, retrying once on a server-issued nonce; the tokens are therefore useless without the key, and the key never leaves the server. Login uses the OpenID Connect authorization-code flow with [PKCE (RFC 7636)](https://www.rfc-editor.org/rfc/rfc7636) `S256` and asks for an ID token with a nonce kept with the parked flow. The browser's return must name the authority's issuer ([RFC 9207](https://www.rfc-editor.org/rfc/rfc9207)), or its code is never redeemed; a sign-in establishes a session only when its ID token passes go-authbyte's check (issuer, this client alone, signature, the nonce, and a method among the ones asked for). A step-up answers no ID token and is redeemed as before. The method asked for (`acr_values` on `/login/start`) is named in the authority's own method names, `eparakstsMobile`, `eidScan` or `webEid`, and the authority refuses a sign-in completed with another one (the login method binds which signing flows are permitted).
 
 **To reach a domain service** the handler exchanges the user's access token for a downstream token that carries the *user's* identity, via [OAuth 2.0 Token Exchange (RFC 8693)](https://www.rfc-editor.org/rfc/rfc8693). document-store, envelope, signflow, and previewbyte each owner-filter on that delegated subject, so the user's own data is reachable and no cross-user access is possible. A call with no subject token does not fall back to this service's identity — it fails closed. The delegated token is cached by the authentication library, keyed on a fingerprint of the user's own token, never on the person alone: a delegated token bakes in the claims of the token it was exchanged for (the login method, the assurance level, the organisation), so a re-login with a *different* method gets a fresh exchange instead of a token carrying the *old* method, which signflow's login-to-flow binding check would reject. A cached token is not reused once the user's token has expired.
 
@@ -208,7 +206,7 @@ sequenceDiagram
 | Key | Value | TTL | Role |
 |---|---|---|---|
 | `portal:flow:{state}` | login-in-progress: the per-session key + PKCE verifier (+ session id for a step-up) | `FLOW_TTL` (10m) | write on login start; single-use `GETDEL` on callback |
-| `portal:sess:{id}` | logged-in session: per-session key, access/refresh tokens + expiry, subject, anti-forgery token, card auth cert | `SESSION_TTL` (12h) | write on login; read on every authenticated request; deleted on logout |
+| `portal:sess:{id}` | logged-in session: per-session key, access/refresh tokens + expiry, subject, anti-forgery token, signing capabilities | `SESSION_TTL` (12h) | write on login; read on every authenticated request; deleted on logout |
 
 The login flow is redeemed with an atomic get-and-delete, so a replayed callback finds nothing. In development, an in-memory store backs the same interface (it does **not** survive a restart and does **not** scale past one instance); production must set `REDIS_URL`.
 
@@ -261,7 +259,7 @@ signbyte-bff/
 ├── app.go, config.go, auditposter.go, testing.go   — App container, config, audit poster, test harness
 ├── cmd/server/                                      — CLI entrypoint (web default, health subcommand)
 ├── routes/                                          — HTTP handlers (the only surface the SPA reaches)
-│   ├── session.go, webeid.go   — login · callback · me · refresh · logout · step-up
+│   ├── session.go              — login · callback · me · refresh · logout · step-up
 │   ├── documents.go, preview.go — document + review-only preview passthroughs (on-behalf)
 │   ├── signing.go              — signing-job status · client signature · abandon · validation
 │   ├── envelope.go             — multi-signer envelopes + composed detail view

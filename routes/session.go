@@ -226,9 +226,7 @@ func (r *router) loginCallback(ctx *azugo.Context) {
 		return
 	}
 
-	// A redirect login (eParaksts Mobile / eID Scan) has no card auth certificate to
-	// capture; only the eID-card flow supplies one.
-	if err := r.establishSession(ctx, flow.Key, tokens, ""); err != nil {
+	if err := r.establishSession(ctx, flow.Key, tokens); err != nil {
 		r.fail(ctx, err)
 
 		return
@@ -259,9 +257,10 @@ func (r *router) exchangeFlow(ctx *azugo.Context, key *ecdsa.PrivateKey, code st
 
 // establishSession mints a new cookie session from a freshly issued token set,
 // keyed to the per-session signing-bound key, and sets the browser cookies (the
-// http-only session id + the readable anti-forgery token). signingAuthCert is the
-// card auth certificate captured at eID-card login (empty for redirect logins).
-func (r *router) establishSession(ctx *azugo.Context, keyEnc string, tokens *asclient.Tokens, signingAuthCert string) error {
+// http-only session id + the readable anti-forgery token), keeping the signing
+// capabilities the Auth Service returned with the tokens (a card sign-in's carry
+// the card's authentication certificate).
+func (r *router) establishSession(ctx *azugo.Context, keyEnc string, tokens *asclient.Tokens) error {
 	sid, err := asclient.RandomToken(32)
 	if err != nil {
 		return err
@@ -272,12 +271,11 @@ func (r *router) establishSession(ctx *azugo.Context, keyEnc string, tokens *asc
 	}
 
 	sess := &session.Session{
-		Key:             keyEnc,
-		RefreshToken:    tokens.RefreshToken,
-		CSRF:            csrf,
-		Subject:         asclient.SubjectFromToken(tokens.AccessToken),
-		SigningAuthCert: signingAuthCert,
-		Capabilities:    capabilitiesFromTokens(tokens),
+		Key:          keyEnc,
+		RefreshToken: tokens.RefreshToken,
+		CSRF:         csrf,
+		Subject:      asclient.SubjectFromToken(tokens.AccessToken),
+		Capabilities: capabilitiesFromTokens(tokens),
 	}
 	applyTokens(sess, tokens)
 	if err := r.Sessions().PutSession(ctx, sid, sess); err != nil {

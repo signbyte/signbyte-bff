@@ -102,7 +102,7 @@ func TestASignInFinishesOnceInTheBrowserThatStartedIt(t *testing.T) {
 	qt.Check(t, qt.IsTrue(signedIn(client)))
 
 	qt.Check(t, qt.IsTrue(strings.Contains(returnTo(t, client, codeFor(state)), "error=expired")))
-	tokens, _ := authority.counts()
+	tokens := authority.counts()
 	qt.Check(t, qt.Equals(tokens, 1))
 }
 
@@ -128,14 +128,14 @@ func TestAReturnInAnotherBrowserSignsNobodyIn(t *testing.T) {
 		qt.Check(t, qt.IsTrue(strings.Contains(loc, "error=expired")), qt.Commentf("%s: %s", try.name, loc))
 		qt.Check(t, qt.IsFalse(signedIn(try.client)), qt.Commentf("%s", try.name))
 	}
-	tokens, _ := authority.counts()
+	tokens := authority.counts()
 	qt.Check(t, qt.Equals(tokens, 0))
 
 	// Neither browser's own sign-in was touched by the refusals.
 	qt.Check(t, qt.Equals(returnTo(t, starter, codeFor(state)), "http://localhost:8080/"))
 	qt.Check(t, qt.IsTrue(signedIn(starter)))
 	qt.Check(t, qt.Equals(returnTo(t, other, codeFor(otherState)), "http://localhost:8080/"))
-	tokens, _ = authority.counts()
+	tokens = authority.counts()
 	qt.Check(t, qt.Equals(tokens, 2))
 }
 
@@ -164,7 +164,7 @@ func TestTwoSignInsInOneBrowserBothFinish(t *testing.T) {
 
 	qt.Check(t, qt.Equals(returnTo(t, client, codeFor(second)), "http://localhost:8080/"))
 	qt.Check(t, qt.Equals(returnTo(t, client, codeFor(first)), "http://localhost:8080/"))
-	tokens, _ := authority.counts()
+	tokens := authority.counts()
 	qt.Check(t, qt.Equals(tokens, 2))
 }
 
@@ -200,7 +200,7 @@ func TestASignInParkedWithoutABindingIsRefused(t *testing.T) {
 
 	qt.Check(t, qt.IsTrue(strings.Contains(returnTo(t, client, codeFor("state-earlier")), "error=expired")))
 	qt.Check(t, qt.IsFalse(signedIn(client)))
-	tokens, _ := authority.counts()
+	tokens := authority.counts()
 	qt.Check(t, qt.Equals(tokens, 0))
 }
 
@@ -227,66 +227,6 @@ func TestAnElevationReturnInAnotherBrowserElevatesNothing(t *testing.T) {
 	qt.Check(t, qt.Equals(sess.RefreshToken, "refresh-1"))
 }
 
-// startCardSignIn fetches a card challenge in client and returns the flow's state.
-func startCardSignIn(t *testing.T, client *azugo.TestClient) string {
-	t.Helper()
-
-	resp, err := client.Post(signInRoutes+"/webeid/start", nil)
-	qt.Assert(t, qt.IsNil(err))
-	qt.Assert(t, qt.Equals(resp.StatusCode(), fasthttp.StatusOK))
-	buf, err := resp.BodyUncompressed()
-	fasthttp.ReleaseResponse(resp)
-	qt.Assert(t, qt.IsNil(err))
-	var out struct {
-		State string `json:"state"`
-	}
-	qt.Assert(t, qt.IsNil(json.Unmarshal(buf, &out)))
-
-	return out.State
-}
-
-// completeCardSignIn posts the card's signed challenge for state in client and
-// answers the status and the problem code, if any.
-func completeCardSignIn(t *testing.T, client *azugo.TestClient, state string, opts ...azugo.TestClientOption) (int, string) {
-	t.Helper()
-
-	resp, err := client.PostJSON(signInRoutes+"/webeid/complete",
-		map[string]any{"state": state, "authToken": map[string]string{"format": "web-eid:1.0"}}, opts...)
-	qt.Assert(t, qt.IsNil(err))
-	status := resp.StatusCode()
-	buf, _ := resp.BodyUncompressed()
-	fasthttp.ReleaseResponse(resp)
-	var problem struct {
-		Code string `json:"code"`
-	}
-	_ = json.Unmarshal(buf, &problem)
-
-	return status, problem.Code
-}
-
-func TestACardSignInFinishesOnlyInTheBrowserThatStartedIt(t *testing.T) {
-	_, ta, authority := signInApp(t)
-	starter := ta.TestClient()
-	state := startCardSignIn(t, starter)
-	qt.Check(t, qt.Equals(len(starter.Cookies()[signInCookieName]), 43))
-
-	other := ta.TestClient()
-	startCardSignIn(t, other)
-	for _, client := range []*azugo.TestClient{ta.TestClient(), other} {
-		status, code := completeCardSignIn(t, client, state)
-		qt.Check(t, qt.Equals(status, fasthttp.StatusBadRequest))
-		qt.Check(t, qt.Equals(code, "err:session:flowExpired"))
-		qt.Check(t, qt.IsFalse(signedIn(client)))
-	}
-	tokens, cardLogins := authority.counts()
-	qt.Check(t, qt.Equals(cardLogins, 0))
-	qt.Check(t, qt.Equals(tokens, 0))
-
-	status, _ := completeCardSignIn(t, starter, state)
-	qt.Check(t, qt.Equals(status, fasthttp.StatusOK))
-	qt.Check(t, qt.IsTrue(signedIn(starter)))
-}
-
 func TestASignInMustBeAFreshOne(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -309,11 +249,6 @@ func TestASignInMustBeAFreshOne(t *testing.T) {
 			loc := returnTo(t, client, codeFor(state))
 			qt.Check(t, qt.Equals(!strings.Contains(loc, "error="), tc.ok), qt.Commentf("%s", loc))
 			qt.Check(t, qt.Equals(signedIn(client), tc.ok))
-
-			card := ta.TestClient()
-			status, _ := completeCardSignIn(t, card, startCardSignIn(t, card))
-			qt.Check(t, qt.Equals(status == fasthttp.StatusOK, tc.ok), qt.Commentf("card: HTTP %d", status))
-			qt.Check(t, qt.Equals(signedIn(card), tc.ok))
 		})
 	}
 }
@@ -362,30 +297,11 @@ func TestAPlantedBindingIsNeverRead(t *testing.T) {
 			qt.Check(t, qt.IsTrue(strings.Contains(loc, "error=expired")), qt.Commentf("%s: %s", try.name, loc))
 			qt.Check(t, qt.IsFalse(signedInUnderAnyName(try.client)), qt.Commentf("%s", try.name))
 		}
-		tokens, _ := authority.counts()
+		tokens := authority.counts()
 		qt.Check(t, qt.Equals(tokens, 0))
 
 		// The attacker's own sign-in was not touched by the refusals.
 		qt.Check(t, qt.Equals(returnTo(t, attacker, codeFor(state)), "http://localhost:8080/"))
-		qt.Check(t, qt.IsTrue(signedIn(attacker)))
-	})
-
-	t.Run("the card completion", func(t *testing.T) {
-		_, ta, authority := signInApp(t)
-		attacker := ta.TestClient()
-		state := startCardSignIn(t, attacker)
-
-		for _, try := range plantedBindings(ta, attacker.Cookies()[signInCookieName]) {
-			status, code := completeCardSignIn(t, try.client, state, try.opts...)
-			qt.Check(t, qt.Equals(status, fasthttp.StatusBadRequest), qt.Commentf("%s", try.name))
-			qt.Check(t, qt.Equals(code, "err:session:flowExpired"), qt.Commentf("%s", try.name))
-			qt.Check(t, qt.IsFalse(signedInUnderAnyName(try.client)), qt.Commentf("%s", try.name))
-		}
-		_, cardLogins := authority.counts()
-		qt.Check(t, qt.Equals(cardLogins, 0))
-
-		status, _ := completeCardSignIn(t, attacker, state)
-		qt.Check(t, qt.Equals(status, fasthttp.StatusOK))
 		qt.Check(t, qt.IsTrue(signedIn(attacker)))
 	})
 }

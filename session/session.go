@@ -72,12 +72,6 @@ type Session struct {
 	// CSRF is the per-session token the browser must echo on every state-changing
 	// request, defending the cookie session against cross-site request forgery.
 	CSRF string `json:"csrf"`
-	// SigningAuthCert is the card authentication certificate captured at eID-card
-	// login (the login token's unverifiedCertificate), reused as the finalize auth
-	// certificate when signing so the card is not authenticated a second time at
-	// signing. A public certificate, session-scoped (gone on logout/expiry); empty
-	// for non-card logins.
-	SigningAuthCert string `json:"signing_auth_cert,omitempty"`
 	// Capabilities is the signing-capability set the auth service captured at
 	// login and returned on the code exchange: the signing identity this login
 	// method uses, its certificate, the auth certificate, and the person's

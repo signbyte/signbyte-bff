@@ -39,8 +39,6 @@ type signInAuthority struct {
 	authOffset time.Duration           // auth_time = the sign-in's start + authOffset
 	noAuthTime bool
 	tokens     int
-	cardLogins int
-	challenges int
 }
 
 // signInApp starts the BFF against a fresh stand-in authority, which learns each
@@ -78,16 +76,6 @@ func signInAppIn(t *testing.T, environment string) (*api.App, *azugo.TestApp, *s
 				"id_token":      a.idToken(strings.TrimPrefix(r.PostForm.Get("code"), "code-")),
 			})
 			_, _ = w.Write(body)
-		case "/webeid/challenge":
-			a.challenges++
-			_, _ = w.Write([]byte(`{"nonce":"card-nonce","state":"card-flow-` + strconv.Itoa(a.challenges) + `"}`))
-		case "/webeid/login":
-			a.cardLogins++
-			var login struct {
-				State string `json:"state"`
-			}
-			_ = json.NewDecoder(r.Body).Decode(&login)
-			_, _ = w.Write([]byte(`{"code":"code-` + login.State + `"}`))
 		case "/revoke":
 		default:
 			http.NotFound(w, r)
@@ -106,12 +94,12 @@ func signInAppIn(t *testing.T, environment string) (*api.App, *azugo.TestApp, *s
 	return app, ta, a
 }
 
-// counts reads what reached the authority: code exchanges and card logins.
-func (a *signInAuthority) counts() (tokens, cardLogins int) {
+// counts reads the code exchanges that reached the authority.
+func (a *signInAuthority) counts() (tokens int) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	return a.tokens, a.cardLogins
+	return a.tokens
 }
 
 // answerAuthenticatedAt makes the ID tokens that follow name an authentication

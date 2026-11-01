@@ -71,19 +71,31 @@ func TestRefreshWithoutSessionUnauthorized(t *testing.T) {
 // reaches what comes after the binding check.
 const testBinding = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 
-// TestWebEIDCompleteUnknownFlow proves the eID-card completion fails closed when
-// the flow handle is unknown/expired — it rejects before any upstream call.
-func TestWebEIDCompleteUnknownFlow(t *testing.T) {
+// The card is read on the Auth Service's own sign-in page: the card sign-in
+// starts like every other, naming the card, and this service has no card lane
+// of its own.
+func TestTheCardSignsInThroughTheAuthServicesPage(t *testing.T) {
 	app := testApp(t)
 	app.Start(t)
 	defer app.Stop()
 
-	body := []byte(`{"state":"does-not-exist","authToken":{"x":1}}`)
 	client := app.TestClient()
-	resp, err := client.Post("/api/portal/v1/login/webeid/complete", body, client.WithCookie(signInCookieName, testBinding))
+	resp, err := client.Post("/api/portal/v1/login/start", []byte(`{"acr_values":"webEid"}`))
 	qt.Assert(t, qt.IsNil(err))
-	qt.Assert(t, qt.Equals(resp.StatusCode(), fasthttp.StatusBadRequest))
+	qt.Assert(t, qt.Equals(resp.StatusCode(), fasthttp.StatusOK))
+	var out response.LoginStart
+	qt.Assert(t, qt.IsNil(json.Unmarshal(resp.Body(), &out)))
 	fasthttp.ReleaseResponse(resp)
+	u, err := url.Parse(out.AuthorizeURL)
+	qt.Assert(t, qt.IsNil(err))
+	qt.Check(t, qt.Equals(u.Query().Get("acr_values"), "webEid"))
+
+	for _, path := range []string{"/api/portal/v1/login/webeid/start", "/api/portal/v1/login/webeid/complete"} {
+		resp, err := client.Post(path, []byte(`{"state":"s","authToken":{"x":1}}`), client.WithCookie(signInCookieName, testBinding))
+		qt.Assert(t, qt.IsNil(err))
+		qt.Check(t, qt.Equals(resp.StatusCode(), fasthttp.StatusNotFound), qt.Commentf("%s", path))
+		fasthttp.ReleaseResponse(resp)
+	}
 }
 
 // TestLoginCallbackIdPErrorMarker proves the callback classifies the IdP's OAuth2
@@ -295,13 +307,6 @@ func TestASignInIsRedeemedOnlyWithItsIDToken(t *testing.T) {
 	parkFlow(t, app, session.FlowKey("state-no-nonce", testBinding), session.Flow{})
 	qt.Check(t, qt.IsTrue(strings.Contains(callback(t, ta, "code=c3&state=state-no-nonce"+iss, bound), "error=login_failed")))
 	qt.Check(t, qt.Equals(calls.token, 0))
-
-	// The card sign-in's completion completes sign-ins only, never an elevation.
-	parkFlow(t, app, session.FlowKey("state-card-elevation", testBinding), session.Flow{SessionID: sid})
-	resp, err = ta.TestClient().Post("/api/portal/v1/login/webeid/complete", []byte(`{"state":"state-card-elevation","authToken":{"x":1}}`), bound)
-	qt.Assert(t, qt.IsNil(err))
-	qt.Check(t, qt.Equals(resp.StatusCode(), fasthttp.StatusBadRequest))
-	fasthttp.ReleaseResponse(resp)
 }
 
 // revokeCall is one sign-out the Auth Service stand-in received.

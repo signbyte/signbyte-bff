@@ -257,9 +257,9 @@ func TestSignSlotNotEligible(t *testing.T) {
 }
 
 // TestSignSlotWebEidThreadsCerts proves a per-slot in-browser (webEid) signing
-// threads the app's signing certificate and the auth certificate captured at card
-// login down to the orchestrator (Layer 1/2), so envelope slots can be signed
-// with the card.
+// threads the app's signing certificate and the card's auth certificate, which
+// the Auth Service returned in the card sign-in's capabilities, down to the
+// orchestrator (Layer 1/2), so envelope slots can be signed with the card.
 func TestSignSlotWebEidThreadsCerts(t *testing.T) {
 	app := api.TestApp(t)
 	qt.Assert(t, qt.IsNil(Init(app)))
@@ -276,7 +276,7 @@ func TestSignSlotWebEidThreadsCerts(t *testing.T) {
 	const sid, csrf = "slot-webeid-sid", "slot-webeid-csrf"
 	err := app.Sessions().PutSession(context.Background(), sid, &session.Session{
 		Subject: "user-1", AccessToken: "tok", AccessExpiry: 1 << 62, CSRF: csrf,
-		SigningAuthCert: "MIIauthFromLogin",
+		Capabilities: &session.Capabilities{AuthCertificate: "MIIauthFromLogin"},
 	})
 	qt.Assert(t, qt.IsNil(err))
 

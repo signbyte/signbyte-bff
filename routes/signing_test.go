@@ -25,15 +25,6 @@ func TestSigningRequiresSession(t *testing.T) {
 	fasthttp.ReleaseResponse(resp)
 }
 
-// TestAuthCertFromToken extracts the card auth certificate from a login token, and
-// returns "" for a malformed token (signing then falls back to a supplied cert).
-func TestAuthCertFromToken(t *testing.T) {
-	qt.Check(t, qt.Equals(
-		authCertFromToken(json.RawMessage(`{"algorithm":"ES384","unverifiedCertificate":"MIIauth","signature":"s"}`)),
-		"MIIauth"))
-	qt.Check(t, qt.Equals(authCertFromToken(json.RawMessage(`not json`)), ""))
-}
-
 // TestSigningStatusRelaysChainAdvanced proves the BFF relays the orchestrator's
 // keep-latest conflict as the structured chain-advanced code (a 409), so the SPA can
 // tell the signer another party co-signed and to sign the updated document again —

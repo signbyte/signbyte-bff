@@ -32,13 +32,6 @@ type MeSeal struct {
 	Label string `json:"label"`
 }
 
-// WebEIDChallenge is returned to begin an eID-card login: the card challenge the
-// app signs in the browser, plus the flow handle to complete with.
-type WebEIDChallenge struct {
-	Nonce string `json:"nonce"`
-	State string `json:"state"`
-}
-
 // OK is a minimal success acknowledgement.
 type OK struct {
 	OK bool `json:"ok"`

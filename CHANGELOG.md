@@ -5,6 +5,22 @@ runs the service or integrates against it.
 
 ## v0.3.2
 
+### Removed — the card sign-in's own routes
+
+`POST /api/portal/v1/login/webeid/start` and `POST /api/portal/v1/login/webeid/complete` are gone and answer `404`.
+A card sign-in now starts like every other one, naming the card:
+
+```http
+POST /api/portal/v1/login/start
+{"acr_values": "webEid"}
+```
+
+authbyte reads the card on its own sign-in page (from authbyte v0.4.0), and the browser comes back to
+`/api/portal/v1/login/callback` with a code. Card signing takes the card's authentication certificate from the
+sign-in's signing capabilities, which authbyte returns for a card sign-in; a session made by the removed routes
+still carries those, so a card session signed in before this version keeps signing. Needs signbyte-spa v0.4.1,
+whose card button starts the sign-in this way.
+
 ### Security — every cookie is `__Host-` and read by its own name
 
 Over TLS, and in every environment but `development`, the cookies are named `__Host-portal_session`,

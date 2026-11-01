@@ -5,6 +5,18 @@ runs the service or integrates against it.
 
 ## v0.3.2
 
+### Security — every cookie is `__Host-` and read by its own name
+
+Over TLS, and in every environment but `development`, the cookies are named `__Host-portal_session`,
+`__Host-portal_csrf` and `__Host-portal_signin`, set `Secure`, `Path=/` and without a Domain, and each is read under
+that exact name only. Before this, each was read by its plain name, which the framework resolves to a `__Host-` or
+`__Secure-` copy first, so whoever could set a cookie for this host — a page on a sibling host, or anyone on the network
+path — could plant a session or a sign-in binding of their own and have it read. Sign-out clears the cookies with
+`Secure`, as the prefix requires. A `development` edge reached over plain HTTP keeps the plain names. **Everyone signed
+in when this version starts signs in once more** (the plain-named cookie is no longer read), and a sign-in in progress
+is refused once with `expired`. The application reads the anti-forgery cookie under the new name from signbyte-spa
+v0.4.1.
+
 ### Security — a sign-in belongs to the browser that started it
 
 Every sign-in — by redirect, by card, and a step-up — sets a short-lived, http-only, `SameSite=Lax` cookie,

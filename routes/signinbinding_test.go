@@ -317,3 +317,75 @@ func TestASignInMustBeAFreshOne(t *testing.T) {
 		})
 	}
 }
+
+// signedInUnderAnyName reports whether client holds a session cookie under any name.
+func signedInUnderAnyName(client *azugo.TestClient) bool {
+	for name, value := range client.Cookies() {
+		if strings.HasSuffix(name, sessionCookieName) && value != "" {
+			return true
+		}
+	}
+
+	return false
+}
+
+// plantedBindings are a copy of another browser's binding value under a name the
+// edge does not read on that lane: __Secure- over TLS, __Host- over plain HTTP in
+// development.
+func plantedBindings(ta *azugo.TestApp, value string) []struct {
+	name   string
+	client *azugo.TestClient
+	opts   []azugo.TestClientOption
+} {
+	overTLSClient, plainClient := ta.TestClient(), ta.TestClient()
+
+	return []struct {
+		name   string
+		client *azugo.TestClient
+		opts   []azugo.TestClientOption
+	}{
+		{"over TLS, a __Secure- copy", overTLSClient,
+			[]azugo.TestClientOption{overTLS(overTLSClient), overTLSClient.WithCookie("__Secure-"+signInCookieName, value)}},
+		{"over plain HTTP, a __Host- copy", plainClient,
+			[]azugo.TestClientOption{plainClient.WithCookie(hostName+signInCookieName, value)}},
+	}
+}
+
+func TestAPlantedBindingIsNeverRead(t *testing.T) {
+	t.Run("the return", func(t *testing.T) {
+		_, ta, authority := signInApp(t)
+		attacker := ta.TestClient()
+		state := startSignIn(t, attacker)
+
+		for _, try := range plantedBindings(ta, attacker.Cookies()[signInCookieName]) {
+			loc := returnTo(t, try.client, codeFor(state), try.opts...)
+			qt.Check(t, qt.IsTrue(strings.Contains(loc, "error=expired")), qt.Commentf("%s: %s", try.name, loc))
+			qt.Check(t, qt.IsFalse(signedInUnderAnyName(try.client)), qt.Commentf("%s", try.name))
+		}
+		tokens, _ := authority.counts()
+		qt.Check(t, qt.Equals(tokens, 0))
+
+		// The attacker's own sign-in was not touched by the refusals.
+		qt.Check(t, qt.Equals(returnTo(t, attacker, codeFor(state)), "http://localhost:8080/"))
+		qt.Check(t, qt.IsTrue(signedIn(attacker)))
+	})
+
+	t.Run("the card completion", func(t *testing.T) {
+		_, ta, authority := signInApp(t)
+		attacker := ta.TestClient()
+		state := startCardSignIn(t, attacker)
+
+		for _, try := range plantedBindings(ta, attacker.Cookies()[signInCookieName]) {
+			status, code := completeCardSignIn(t, try.client, state, try.opts...)
+			qt.Check(t, qt.Equals(status, fasthttp.StatusBadRequest), qt.Commentf("%s", try.name))
+			qt.Check(t, qt.Equals(code, "err:session:flowExpired"), qt.Commentf("%s", try.name))
+			qt.Check(t, qt.IsFalse(signedInUnderAnyName(try.client)), qt.Commentf("%s", try.name))
+		}
+		_, cardLogins := authority.counts()
+		qt.Check(t, qt.Equals(cardLogins, 0))
+
+		status, _ := completeCardSignIn(t, attacker, state)
+		qt.Check(t, qt.Equals(status, fasthttp.StatusOK))
+		qt.Check(t, qt.IsTrue(signedIn(attacker)))
+	})
+}

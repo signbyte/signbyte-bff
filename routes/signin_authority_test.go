@@ -48,6 +48,13 @@ type signInAuthority struct {
 func signInApp(t *testing.T) (*api.App, *azugo.TestApp, *signInAuthority) {
 	t.Helper()
 
+	return signInAppIn(t, "development")
+}
+
+// signInAppIn is signInApp in the named environment.
+func signInAppIn(t *testing.T, environment string) (*api.App, *azugo.TestApp, *signInAuthority) {
+	t.Helper()
+
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	qt.Assert(t, qt.IsNil(err))
 	a := &signInAuthority{key: key, signIns: map[string]session.Flow{}}
@@ -89,7 +96,7 @@ func signInApp(t *testing.T) (*api.App, *azugo.TestApp, *signInAuthority) {
 	t.Cleanup(as.Close)
 	t.Setenv("AUTH_INTERNAL_URL", as.URL)
 
-	app := api.TestApp(t)
+	app := api.TestAppIn(t, environment)
 	qt.Assert(t, qt.IsNil(Init(app)))
 	app.SetSessions(signInsTo{Store: app.Sessions(), authority: a})
 	ta := azugo.NewTestApp(app.App)

@@ -5,6 +5,26 @@ runs the service or integrates against it.
 
 ## v0.3.2
 
+### Security — a sign-in belongs to the browser that started it
+
+Every sign-in — by redirect, by card, and a step-up — sets a short-lived, http-only, `SameSite=Lax` cookie,
+`portal_signin`, when it starts, and is parked under its state together with the hash of that cookie's value. The
+return to `/login/callback` and the card completion find it only with the same browser's cookie: a return address
+opened in another browser lands on the `expired` marker (the card completion answers `400 err:session:flowExpired`)
+with no session, and the sign-in stays open for the browser that started it. Before this, a return address opened in
+any browser signed that browser in as whoever had started the sign-in. A browser keeps its value across sign-ins, so
+two started in two tabs both finish; the cookie lives for `FLOW_TTL` and is never cleared. A sign-in in progress when
+this version starts is refused once with `expired`, and the person starts again.
+
+### Changed — every sign-in is a fresh one
+
+The sign-in asks authbyte for `prompt=login` and `max_age=0`, and its ID token's `auth_time` must not be earlier than
+the moment the sign-in started (allowing `go-authbyte`'s 30-second clock skew); a card sign-in is checked the same way
+from its challenge. A signature rests on this sign-in, so on a shared browser the provider is asked not to let its own
+session answer the next person's sign-in. A provider that ignores `prompt=login` and names an authentication earlier
+than the request is refused by authbyte, and the person sees the sign-in fail; one that ignores it and names no
+authentication time cannot be told apart here.
+
 ### Changed — a sign-in is proven by its ID token
 
 On `go-authbyte` v0.36.0, every sign-in, by redirect and by card, asks authbyte for an ID token with a nonce kept with

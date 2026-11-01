@@ -3,6 +3,7 @@ package routes
 import (
 	"encoding/json"
 	"errors"
+	"time"
 
 	"azugo.io/azugo"
 	"github.com/valyala/fasthttp"
@@ -18,6 +19,10 @@ import (
 // errNotACardSignIn is a parked elevation presented to the card sign-in's
 // completion, which only ever completes a sign-in.
 var errNotACardSignIn = errors.New("the flow is an elevation, not a card sign-in")
+
+// errNoBinding is a completion from a browser holding no sign-in cookie, which
+// therefore started no sign-in here.
+var errNoBinding = errors.New("the browser holds no sign-in binding")
 
 // loginWebEIDStart begins an eID-card login. Unlike the redirect methods there is
 // no browser navigation: this mints the per-session key + proof-key, asks the Auth
@@ -61,6 +66,14 @@ func (r *router) loginWebEIDStart(ctx *azugo.Context) {
 		return
 	}
 
+	binding, err := bindBrowser(ctx, r.Config().FlowTTL)
+	if err != nil {
+		r.fail(ctx, err)
+
+		return
+	}
+
+	started := time.Now()
 	nonce, flow, err := r.AuthService().WebEIDChallengeWithNonce(ctx, challenge, spaState, idNonce)
 	if err != nil {
 		ctx.Log().Warn("web eid challenge failed")
@@ -70,9 +83,11 @@ func (r *router) loginWebEIDStart(ctx *azugo.Context) {
 		return
 	}
 
-	// Park the flow under the Auth Service's handle so the completion can redeem it
-	// with the same key the issued token will be bound to, and check its ID token.
-	if err := r.Sessions().PutFlow(ctx, flow, &session.Flow{Key: keyEnc, Verifier: verifier, Nonce: idNonce}); err != nil {
+	// Park the flow under the Auth Service's handle, bound to this browser, so the
+	// completion can redeem it with the same key the issued token will be bound to,
+	// and check its ID token.
+	parked := &session.Flow{Key: keyEnc, Verifier: verifier, Nonce: idNonce, Started: started}
+	if err := r.Sessions().PutFlow(ctx, session.FlowKey(flow, binding), parked); err != nil {
 		r.fail(ctx, err)
 
 		return
@@ -84,7 +99,8 @@ func (r *router) loginWebEIDStart(ctx *azugo.Context) {
 // loginWebEIDComplete finishes an eID-card login: it redeems the card token for an
 // authorization code, exchanges that for a key-bound token, and establishes the
 // cookie session. Returns JSON (no navigation); the app then loads the session.
-// Anonymous (the single-use flow handle is the guard).
+// Anonymous (the single-use flow handle, with the sign-in cookie of the browser
+// that fetched the challenge, is the guard).
 //
 // @operationId PortalWebEIDComplete
 // @title Complete eID-card login
@@ -98,7 +114,15 @@ func (r *router) loginWebEIDComplete(ctx *azugo.Context) {
 		return
 	}
 
-	flow, err := r.Sessions().TakeFlow(ctx, req.State)
+	// The sign-in belongs to the browser that fetched its challenge: a completion
+	// without that browser's value names no flow, and the flow stays parked.
+	var flow *session.Flow
+	err := errNoBinding
+	if binding := browserBinding(ctx); binding != "" {
+		flow, err = r.Sessions().TakeFlow(ctx, session.FlowKey(req.State, binding))
+	} else {
+		ctx.Log().Warn("card sign-in completion without this browser's sign-in binding")
+	}
 	if err == nil && flow.SessionID != "" {
 		// An elevation completes through the login callback, never here.
 		err = errNotACardSignIn

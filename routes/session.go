@@ -29,8 +29,9 @@ const refreshLeeway = 30 * time.Second
 const csrfCookieName = "portal_csrf"
 
 // loginStart begins a login: it mints a fresh signing-bound key + proof-key
-// verifier + state, parks them server-side under the state, and returns the Auth
-// Service authorization URL for the browser to follow. Anonymous.
+// verifier + state, parks them server-side under the state bound to this browser
+// (the sign-in cookie), and returns the Auth Service authorization URL for the
+// browser to follow, asking for a fresh sign-in. Anonymous.
 //
 // @operationId PortalLoginStart
 // @title Begin login
@@ -85,8 +86,15 @@ func (r *router) loginStart(ctx *azugo.Context) {
 		return
 	}
 
-	flow := &session.Flow{Key: keyEnc, Verifier: verifier, Nonce: nonce, ACRValues: req.ACRValues}
-	if err := r.Sessions().PutFlow(ctx, state, flow); err != nil {
+	binding, err := bindBrowser(ctx, r.Config().FlowTTL)
+	if err != nil {
+		r.fail(ctx, err)
+
+		return
+	}
+
+	flow := &session.Flow{Key: keyEnc, Verifier: verifier, Nonce: nonce, ACRValues: req.ACRValues, Started: time.Now()}
+	if err := r.Sessions().PutFlow(ctx, session.FlowKey(state, binding), flow); err != nil {
 		r.fail(ctx, err)
 
 		return
@@ -98,15 +106,27 @@ func (r *router) loginStart(ctx *azugo.Context) {
 			State:         state,
 			Nonce:         nonce,
 			ACRValues:     req.ACRValues,
+			Prompt:        "login",
+			MaxAge:        freshOnly(),
 		}),
 		State: state,
 	})
 }
 
+// freshOnly is the age of authentication a sign-in here accepts: none. A
+// signature rests on the sign-in, so the provider's own session must not answer
+// it for whoever uses the browser next; the ID token's auth_time proves it.
+func freshOnly() *time.Duration {
+	age := time.Duration(0)
+
+	return &age
+}
+
 // loginCallback lands the browser back from the Auth Service, redeems the code
 // for a session-key-bound token, establishes the cookie session, and sends the
-// browser on to the app. Anonymous (the state + proof-key verifier are the
-// guards). On any failure it redirects back with a generic marker.
+// browser on to the app. Anonymous (the state with the browser's sign-in cookie,
+// and the proof-key verifier, are the guards). On any failure it redirects back
+// with a generic marker.
 //
 // @operationId PortalLoginCallback
 // @title Login callback
@@ -149,7 +169,16 @@ func (r *router) loginCallback(ctx *azugo.Context) {
 		return
 	}
 
-	flow, err := r.Sessions().TakeFlow(ctx, *state)
+	// The sign-in belongs to the browser that started it: a return without that
+	// browser's value names no flow, and the flow stays parked for its browser.
+	binding := browserBinding(ctx)
+	if binding == "" {
+		ctx.Log().Warn("login return without this browser's sign-in binding")
+		r.redirectWithError(ctx, "expired")
+
+		return
+	}
+	flow, err := r.Sessions().TakeFlow(ctx, session.FlowKey(*state, binding))
 	if err != nil {
 		r.redirectWithError(ctx, "expired")
 
@@ -212,8 +241,8 @@ func (r *router) loginCallback(ctx *azugo.Context) {
 // exchangeFlow redeems a parked flow's authorization code. An elevation of a
 // session answers no ID token and is redeemed as it is; every other flow is a
 // sign-in, whose answer must carry an ID token proving it (its nonce, a method
-// it named), or no tokens are returned — a sign-in parked without a nonce
-// included.
+// it named, an authentication no earlier than the sign-in began), or no tokens
+// are returned — a sign-in parked without a nonce included.
 func (r *router) exchangeFlow(ctx *azugo.Context, key *ecdsa.PrivateKey, code string, flow *session.Flow) (*asclient.Tokens, error) {
 	if flow.SessionID != "" {
 		return r.AuthService().ExchangeCode(ctx, key, code, flow.Verifier)
@@ -221,6 +250,8 @@ func (r *router) exchangeFlow(ctx *azugo.Context, key *ecdsa.PrivateKey, code st
 	tokens, _, err := r.AuthService().ExchangeSignIn(ctx, key, code, flow.Verifier, asclient.IDTokenCheck{
 		Nonce:     flow.Nonce,
 		ACRValues: flow.ACRValues,
+		MaxAge:    freshOnly(),
+		Started:   flow.Started,
 	})
 
 	return tokens, err
@@ -430,8 +461,15 @@ func (r *router) stepUp(ctx *azugo.Context) {
 		return
 	}
 
+	binding, err := bindBrowser(ctx, r.Config().FlowTTL)
+	if err != nil {
+		r.fail(ctx, err)
+
+		return
+	}
+
 	// Park the elevation flow so the callback updates this session in place.
-	if err := r.Sessions().PutFlow(ctx, state, &session.Flow{Key: sess.Key, Verifier: verifier, SessionID: sid}); err != nil {
+	if err := r.Sessions().PutFlow(ctx, session.FlowKey(state, binding), &session.Flow{Key: sess.Key, Verifier: verifier, SessionID: sid}); err != nil {
 		r.fail(ctx, err)
 
 		return

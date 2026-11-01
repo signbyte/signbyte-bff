@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	api "github.com/signbyte/signbyte-bff"
 	"github.com/signbyte/signbyte-bff/routes/response"
@@ -66,6 +67,10 @@ func TestRefreshWithoutSessionUnauthorized(t *testing.T) {
 	fasthttp.ReleaseResponse(resp)
 }
 
+// testBinding is a well-formed binding value a test browser holds, so a test
+// reaches what comes after the binding check.
+const testBinding = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+
 // TestWebEIDCompleteUnknownFlow proves the eID-card completion fails closed when
 // the flow handle is unknown/expired — it rejects before any upstream call.
 func TestWebEIDCompleteUnknownFlow(t *testing.T) {
@@ -74,7 +79,8 @@ func TestWebEIDCompleteUnknownFlow(t *testing.T) {
 	defer app.Stop()
 
 	body := []byte(`{"state":"does-not-exist","authToken":{"x":1}}`)
-	resp, err := app.TestClient().Post("/api/portal/v1/login/webeid/complete", body)
+	client := app.TestClient()
+	resp, err := client.Post("/api/portal/v1/login/webeid/complete", body, client.WithCookie(signInCookieName, testBinding))
 	qt.Assert(t, qt.IsNil(err))
 	qt.Assert(t, qt.Equals(resp.StatusCode(), fasthttp.StatusBadRequest))
 	fasthttp.ReleaseResponse(resp)
@@ -126,7 +132,9 @@ func TestLoginStart(t *testing.T) {
 	ta.Start(t)
 	defer ta.Stop()
 
-	resp, err := ta.TestClient().Post("/api/portal/v1/login/start", []byte(`{"acr_values":"eidScan"}`))
+	client := ta.TestClient()
+	before := time.Now()
+	resp, err := client.Post("/api/portal/v1/login/start", []byte(`{"acr_values":"eidScan"}`))
 	qt.Assert(t, qt.IsNil(err))
 	qt.Assert(t, qt.Equals(resp.StatusCode(), fasthttp.StatusOK))
 
@@ -145,13 +153,17 @@ func TestLoginStart(t *testing.T) {
 	qt.Check(t, qt.Equals(q.Get("client_id"), "portal-spa"))
 	qt.Check(t, qt.Equals(q.Get("scope"), "openid"))
 	qt.Check(t, qt.Equals(q.Get("acr_values"), "eidScan"))
-	qt.Check(t, qt.IsFalse(q.Has("prompt")))
+	// Every sign-in here is a fresh one: a signature rests on it.
+	qt.Check(t, qt.Equals(q.Get("prompt"), "login"))
+	qt.Check(t, qt.Equals(q.Get("max_age"), "0"))
 
-	flow, err := app.Sessions().TakeFlow(context.Background(), out.State)
+	flow, err := app.Sessions().TakeFlow(context.Background(), session.FlowKey(out.State, client.Cookies()[signInCookieName]))
 	qt.Assert(t, qt.IsNil(err))
 	qt.Check(t, qt.Not(qt.Equals(flow.Nonce, "")))
 	qt.Check(t, qt.Equals(q.Get("nonce"), flow.Nonce))
 	qt.Check(t, qt.Equals(flow.ACRValues, "eidScan"))
+	qt.Check(t, qt.IsFalse(flow.Started.Before(before.Truncate(time.Second))))
+	qt.Check(t, qt.IsFalse(flow.Started.After(time.Now())))
 
 	for _, bad := range []string{"urn:eparaksts:authentication:flow:mobileid", strings.Repeat("a", 65), "eidScan  webEid"} {
 		body, err := json.Marshal(map[string]string{"acr_values": bad})
@@ -214,10 +226,10 @@ func parkFlow(t *testing.T, app *api.App, state string, flow session.Flow) {
 }
 
 // callback lands a return at the callback and answers where the browser is sent.
-func callback(t *testing.T, ta *azugo.TestApp, query string) string {
+func callback(t *testing.T, ta *azugo.TestApp, query string, opts ...azugo.TestClientOption) string {
 	t.Helper()
 
-	resp, err := ta.TestClient().Get("/api/portal/v1/login/callback?" + query)
+	resp, err := ta.TestClient().Get("/api/portal/v1/login/callback?"+query, opts...)
 	qt.Assert(t, qt.IsNil(err))
 	qt.Assert(t, qt.Equals(resp.StatusCode(), fasthttp.StatusFound))
 	loc := string(resp.Header.Peek("Location"))
@@ -254,9 +266,10 @@ func TestASignInIsRedeemedOnlyWithItsIDToken(t *testing.T) {
 	accessToken := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none"}`)) + "." + claims + ".sig"
 	app, ta, calls := callbackApp(t, `{"access_token":"`+accessToken+`","token_type":"DPoP","expires_in":300,"refresh_token":"refresh-1"}`)
 	iss := "&iss=" + url.QueryEscape(testIssuer)
+	bound := ta.TestClient().WithCookie(signInCookieName, testBinding)
 
-	parkFlow(t, app, "state-sign-in", session.Flow{Nonce: "nonce-1", ACRValues: "eparakstsMobile"})
-	resp, err := ta.TestClient().Get("/api/portal/v1/login/callback?code=c1&state=state-sign-in" + iss)
+	parkFlow(t, app, session.FlowKey("state-sign-in", testBinding), session.Flow{Nonce: "nonce-1", ACRValues: "eparakstsMobile"})
+	resp, err := ta.TestClient().Get("/api/portal/v1/login/callback?code=c1&state=state-sign-in"+iss, bound)
 	qt.Assert(t, qt.IsNil(err))
 	qt.Check(t, qt.IsTrue(strings.Contains(string(resp.Header.Peek("Location")), "error=login_failed")))
 	qt.Check(t, qt.IsFalse(strings.Contains(string(resp.Header.Peek("Set-Cookie")), "portal_session=")))
@@ -269,8 +282,8 @@ func TestASignInIsRedeemedOnlyWithItsIDToken(t *testing.T) {
 	qt.Assert(t, qt.IsNil(app.Sessions().PutSession(context.Background(), sid, &session.Session{
 		Subject: "user-1", AccessToken: "old", AccessExpiry: 1 << 62, CSRF: "csrf-1", RefreshToken: "refresh-0",
 	})))
-	parkFlow(t, app, "state-step-up", session.Flow{SessionID: sid})
-	loc := callback(t, ta, "code=c2&state=state-step-up"+iss)
+	parkFlow(t, app, session.FlowKey("state-step-up", testBinding), session.Flow{SessionID: sid})
+	loc := callback(t, ta, "code=c2&state=state-step-up"+iss, bound)
 	qt.Check(t, qt.IsFalse(strings.Contains(loc, "error=")))
 	sess, err := app.Sessions().GetSession(context.Background(), sid)
 	qt.Assert(t, qt.IsNil(err))
@@ -279,13 +292,13 @@ func TestASignInIsRedeemedOnlyWithItsIDToken(t *testing.T) {
 	// A sign-in parked without a nonce (an earlier release's) is not redeemed
 	// at all: no ID token could prove it.
 	calls.token = 0
-	parkFlow(t, app, "state-no-nonce", session.Flow{})
-	qt.Check(t, qt.IsTrue(strings.Contains(callback(t, ta, "code=c3&state=state-no-nonce"+iss), "error=login_failed")))
+	parkFlow(t, app, session.FlowKey("state-no-nonce", testBinding), session.Flow{})
+	qt.Check(t, qt.IsTrue(strings.Contains(callback(t, ta, "code=c3&state=state-no-nonce"+iss, bound), "error=login_failed")))
 	qt.Check(t, qt.Equals(calls.token, 0))
 
 	// The card sign-in's completion completes sign-ins only, never an elevation.
-	parkFlow(t, app, "state-card-elevation", session.Flow{SessionID: sid})
-	resp, err = ta.TestClient().Post("/api/portal/v1/login/webeid/complete", []byte(`{"state":"state-card-elevation","authToken":{"x":1}}`))
+	parkFlow(t, app, session.FlowKey("state-card-elevation", testBinding), session.Flow{SessionID: sid})
+	resp, err = ta.TestClient().Post("/api/portal/v1/login/webeid/complete", []byte(`{"state":"state-card-elevation","authToken":{"x":1}}`), bound)
 	qt.Assert(t, qt.IsNil(err))
 	qt.Check(t, qt.Equals(resp.StatusCode(), fasthttp.StatusBadRequest))
 	fasthttp.ReleaseResponse(resp)
@@ -431,6 +444,15 @@ func TestStepUpNamesTheSessionByItsRefreshToken(t *testing.T) {
 	qt.Check(t, qt.Equals(got["client_id"], any("portal-spa")))
 	_, named := got["session_id"]
 	qt.Check(t, qt.IsFalse(named))
+
+	// The elevation is parked under this browser's value, as a sign-in is: its
+	// return in another browser names nothing.
+	state, _ := got["state"].(string)
+	_, err = app.Sessions().TakeFlow(context.Background(), state)
+	qt.Check(t, qt.ErrorIs(err, session.ErrNotFound))
+	flow, err := app.Sessions().TakeFlow(context.Background(), session.FlowKey(state, tc.Cookies()[signInCookieName]))
+	qt.Assert(t, qt.IsNil(err))
+	qt.Check(t, qt.Equals(flow.SessionID, sid))
 }
 
 // A sign-out the Auth Service refuses or cannot take still signs the person out

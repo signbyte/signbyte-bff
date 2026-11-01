@@ -52,14 +52,14 @@ Base path `/api/portal/v1`. The session is a cookie: **anonymous** endpoints est
 |---|---|---|
 | `GET /healthz` | — | Liveness — 200 whenever the process is up |
 | `GET /readyz` | — | Readiness — pings the session store; 503 `not_ready` when it is unreachable |
-| `POST /api/portal/v1/login/start` | anonymous | Begin a redirect login: mint the per-session key + PKCE verifier + state, park them, return `{authorize_url, state}` |
-| `GET /api/portal/v1/login/callback` | anonymous | Land the browser back, redeem the code for a key-bound token, set the session cookie, redirect to the SPA |
-| `POST /api/portal/v1/login/webeid/start` | anonymous | Begin an eID-card login: mint the key + verifier, request a card challenge, park the flow, return `{nonce, state}` |
-| `POST /api/portal/v1/login/webeid/complete` | anonymous | Redeem the card token (signed in the browser) for a key-bound token, establish the session, return `{ok}` |
+| `POST /api/portal/v1/login/start` | anonymous | Begin a redirect login: mint the per-session key + PKCE verifier + state, park them bound to this browser (the `portal_signin` cookie), return `{authorize_url, state}`; the address asks authbyte for a fresh sign-in (`prompt=login`, `max_age=0`) |
+| `GET /api/portal/v1/login/callback` | anonymous | Land the browser back — only the browser that started the sign-in, else the `expired` marker — redeem the code for a key-bound token, set the session cookie, redirect to the SPA |
+| `POST /api/portal/v1/login/webeid/start` | anonymous | Begin an eID-card login: mint the key + verifier, request a card challenge, park the flow bound to this browser, return `{nonce, state}` |
+| `POST /api/portal/v1/login/webeid/complete` | anonymous | From the browser that fetched the challenge only (else `400 err:session:flowExpired`): redeem the card token (signed in the browser) for a key-bound token, establish the session, return `{ok}` |
 | `GET /api/portal/v1/me` | session | The user's identity + permitted signing flows (composed from authbyte-core, narrowed to the flows the signing service runs — see `SIGNER_FLOWS_TTL`), plus seal availability when the login captured it: `can_eseal` (null = unknown, false = verifiably none) and `seals[{id,label}]` for the picker — certificates never reach the browser |
 | `POST /api/portal/v1/session/refresh` | session + CSRF | Re-issue the access token within the session |
 | `POST /api/portal/v1/logout` | session + CSRF | End the session at authbyte-core server to server (`POST /revoke` with the refresh token and the session key), invalidate the session, clear the cookies, return the front-channel logout URL — which names no session, only the client, the landing address and the login method |
-| `POST /api/portal/v1/step-up` | session + CSRF | Ask authbyte-core to elevate to a stronger login method; relay its instruction to the SPA |
+| `POST /api/portal/v1/step-up` | session + CSRF | Ask authbyte-core to elevate to a stronger login method, parked bound to this browser like a sign-in; relay its instruction to the SPA |
 | `GET /api/portal/v1/dashboard` | session | The composed library view in one fetch: the signer inbox + the user's envelopes + their **standalone document chains** (one live-head row per chain; a chain covered by an envelope — owned **or** awaiting the user's signature as an invited signer — is subtracted server-side, so one envelope/chain = one row). A **terminal envelope whose documents' storage retention has destroyed** is dropped too: the record's home is history, and a live row over gone bytes could only offer actions that answer 410 |
 | `POST /api/portal/v1/documents` | session + CSRF | Upload (multipart) on the user's behalf → `{id, contentHash, mime, size, preservationClass}` |
 | `GET /api/portal/v1/documents` | session | List the user's own documents (`?limit` / `?after` keyset paging) |

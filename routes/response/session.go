@@ -8,8 +8,7 @@ type LoginStart struct {
 	State        string `json:"state"`
 }
 
-// Me is the logged-in user's identity, shaped for the app's flow chooser and
-// step-up prompts.
+// Me is the logged-in user's identity, shaped for the app's flow chooser.
 type Me struct {
 	Sub            string   `json:"sub"`
 	Name           string   `json:"name"`

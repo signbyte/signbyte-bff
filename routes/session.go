@@ -200,32 +200,7 @@ func (r *router) loginCallback(ctx *azugo.Context) {
 		return
 	}
 
-	// Elevation of an existing session keeps the same cookie; a fresh login mints a
-	// new session id + anti-forgery token.
-	if flow.SessionID != "" {
-		sess, err := r.Sessions().GetSession(ctx, flow.SessionID)
-		if err != nil {
-			r.redirectWithError(ctx, "expired")
-
-			return
-		}
-		applyTokens(sess, tokens)
-		// A step-up is a new identification: its capabilities replace (or
-		// clear) what the previous login captured — they describe the CURRENT
-		// login method.
-		sess.Capabilities = capabilitiesFromTokens(tokens)
-		if err := r.Sessions().PutSession(ctx, flow.SessionID, sess); err != nil {
-			r.fail(ctx, err)
-
-			return
-		}
-		ctx.StatusCode(fasthttp.StatusFound)
-		// PostLoginURL is the SPA origin (cross-origin) — bypass same-origin sanitizing.
-		ctx.RedirectUnsafe(r.Config().PostLoginURL)
-
-		return
-	}
-
+	// A sign-in mints a new session id + anti-forgery token.
 	if err := r.establishSession(ctx, flow.Key, tokens); err != nil {
 		r.fail(ctx, err)
 
@@ -236,15 +211,12 @@ func (r *router) loginCallback(ctx *azugo.Context) {
 	ctx.RedirectUnsafe(r.Config().PostLoginURL)
 }
 
-// exchangeFlow redeems a parked flow's authorization code. An elevation of a
-// session answers no ID token and is redeemed as it is; every other flow is a
-// sign-in, whose answer must carry an ID token proving it (its nonce, a method
-// it named, an authentication no earlier than the sign-in began), or no tokens
-// are returned — a sign-in parked without a nonce included.
+// exchangeFlow redeems a parked sign-in's authorization code. The answer must
+// carry an ID token proving it (its nonce, a method it named, an authentication no
+// earlier than the sign-in began), or no tokens are returned — a sign-in parked
+// without a nonce included, which is how an earlier release's elevation of a
+// session reads now.
 func (r *router) exchangeFlow(ctx *azugo.Context, key *ecdsa.PrivateKey, code string, flow *session.Flow) (*asclient.Tokens, error) {
-	if flow.SessionID != "" {
-		return r.AuthService().ExchangeCode(ctx, key, code, flow.Verifier)
-	}
 	tokens, _, err := r.AuthService().ExchangeSignIn(ctx, key, code, flow.Verifier, asclient.IDTokenCheck{
 		Nonce:     flow.Nonce,
 		ACRValues: flow.ACRValues,
@@ -421,87 +393,6 @@ func (r *router) logout(ctx *azugo.Context) {
 	ctx.JSON(&response.Logout{OK: true, LogoutURL: logoutURL})
 }
 
-// stepUp asks the Auth Service to elevate the session to a stronger login method
-// and relays its instruction (a redirect to a stronger login, or a card-signing
-// challenge) to the app verbatim. The elevation completes back through the login
-// callback, keeping the same session.
-//
-// @operationId PortalStepUp
-// @title Step up
-// @route /api/portal/v1/step-up [post].
-func (r *router) stepUp(ctx *azugo.Context) {
-	sid, sess := sessionFromCtx(ctx)
-
-	var req request.StepUp
-	if err := ctx.Body.JSON(&req); err != nil {
-		ctx.Error(err)
-
-		return
-	}
-
-	key, err := session.ParseKey(sess.Key)
-	if err != nil {
-		r.fail(ctx, err)
-
-		return
-	}
-
-	verifier, challenge, err := asclient.PKCE()
-	if err != nil {
-		r.fail(ctx, err)
-
-		return
-	}
-	state, err := asclient.RandomToken(24)
-	if err != nil {
-		r.fail(ctx, err)
-
-		return
-	}
-
-	binding, err := bindBrowser(ctx, r.Config().FlowTTL)
-	if err != nil {
-		r.fail(ctx, err)
-
-		return
-	}
-
-	// Park the elevation flow so the callback updates this session in place.
-	if err := r.Sessions().PutFlow(ctx, session.FlowKey(state, binding), &session.Flow{Key: sess.Key, Verifier: verifier, SessionID: sid}); err != nil {
-		r.fail(ctx, err)
-
-		return
-	}
-
-	token, err := r.freshToken(ctx, sid, sess)
-	if err != nil {
-		ctx.Error(pkerrors.NewProblem("err:session:unauthorized",
-			pkerrors.WithDetail("session could not be refreshed")))
-
-		return
-	}
-
-	body, status, err := r.AuthService().StepUp(ctx, key, token, asclient.StepUpRequest{
-		RefreshToken:  sess.RefreshToken,
-		ClientID:      r.Config().AuthClientID,
-		Method:        req.Method,
-		CodeChallenge: challenge,
-		RedirectURI:   r.Config().AuthRedirectURI,
-		State:         state,
-	})
-	if err != nil {
-		ctx.Log().Warn("step-up request failed")
-		ctx.Error(pkerrors.NewProblem("err:upstream:unavailable",
-			pkerrors.WithStatus(fasthttp.StatusBadGateway)))
-
-		return
-	}
-
-	ctx.StatusCode(status)
-	ctx.ContentType("application/json")
-	ctx.Raw(body)
-}
-
 // freshToken returns the session access token, refreshing it (and persisting the
 // session) when it is at or near expiry.
 func (r *router) freshToken(ctx *azugo.Context, sid string, sess *session.Session) (string, error) {
@@ -543,7 +434,7 @@ func applyTokens(sess *session.Session, tokens *asclient.Tokens) {
 }
 
 // capabilitiesFromTokens copies the code-exchange's signing capabilities onto
-// the session type. Called only on code-exchange paths (login, step-up) — a
+// the session type. Called only on the sign-in's code exchange — a
 // refresh never carries capabilities, and clearing them there would turn every
 // token refresh into a capability loss.
 func capabilitiesFromTokens(tokens *asclient.Tokens) *session.Capabilities {

@@ -271,8 +271,7 @@ func TestLoginCallbackRefusesAReturnNotNamingTheIssuer(t *testing.T) {
 }
 
 // A sign-in redeemed with no ID token in the answer establishes no session, and
-// the session the exchange opened at the Auth Service is ended. An elevation of a
-// session answers none, and is redeemed as before.
+// the session the exchange opened at the Auth Service is ended.
 func TestASignInIsRedeemedOnlyWithItsIDToken(t *testing.T) {
 	claims := base64.RawURLEncoding.EncodeToString([]byte(`{"sub":"user-1","login_method":"eparakstsMobile"}`))
 	accessToken := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none"}`)) + "." + claims + ".sig"
@@ -289,17 +288,6 @@ func TestASignInIsRedeemedOnlyWithItsIDToken(t *testing.T) {
 	qt.Check(t, qt.Equals(calls.token, 1))
 	qt.Check(t, qt.Equals(calls.revoke, 1))
 	qt.Check(t, qt.Equals(calls.revoked, "refresh-1"))
-
-	const sid = "sid-elevated"
-	qt.Assert(t, qt.IsNil(app.Sessions().PutSession(context.Background(), sid, &session.Session{
-		Subject: "user-1", AccessToken: "old", AccessExpiry: 1 << 62, CSRF: "csrf-1", RefreshToken: "refresh-0",
-	})))
-	parkFlow(t, app, session.FlowKey("state-step-up", testBinding), session.Flow{SessionID: sid})
-	loc := callback(t, ta, "code=c2&state=state-step-up"+iss, bound)
-	qt.Check(t, qt.IsFalse(strings.Contains(loc, "error=")))
-	sess, err := app.Sessions().GetSession(context.Background(), sid)
-	qt.Assert(t, qt.IsNil(err))
-	qt.Check(t, qt.Equals(sess.RefreshToken, "refresh-1"))
 
 	// A sign-in parked without a nonce (an earlier release's) is not redeemed
 	// at all: no ID token could prove it.
@@ -396,68 +384,6 @@ func TestLogoutEndsTheAuthoritySessionAndNamesNoSessionToTheBrowser(t *testing.T
 	qt.Check(t, qt.Not(qt.Equals(calls[0].proof, "")))
 
 	qt.Check(t, qt.IsTrue(gone))
-}
-
-// A step-up names the session to the Auth Service by its refresh token and this
-// client: the Auth Service keeps its own session id to itself.
-func TestStepUpNamesTheSessionByItsRefreshToken(t *testing.T) {
-	sent := make(chan map[string]any, 1)
-	as := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/step-up" {
-			http.NotFound(w, r)
-
-			return
-		}
-		var body map[string]any
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		sent <- body
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"mode":"redirect","authorize_url":"https://idp.example/authorize"}`))
-	}))
-	t.Cleanup(as.Close)
-	t.Setenv("AUTH_INTERNAL_URL", as.URL)
-
-	app := api.TestApp(t)
-	qt.Assert(t, qt.IsNil(Init(app)))
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	qt.Assert(t, qt.IsNil(err))
-	stored, err := session.MarshalKey(key)
-	qt.Assert(t, qt.IsNil(err))
-	const sid, csrf = "sid-step-up", "csrf-step-up"
-	qt.Assert(t, qt.IsNil(app.Sessions().PutSession(context.Background(), sid, &session.Session{
-		Subject: "user-1", AccessToken: "tok", AccessExpiry: 1 << 62, CSRF: csrf,
-		RefreshToken: "refresh-handle-9", Key: stored,
-	})))
-
-	ta := azugo.NewTestApp(app.App)
-	ta.Start(t)
-	defer ta.Stop()
-
-	tc := ta.TestClient()
-	resp, err := tc.PostJSON("/api/portal/v1/step-up", map[string]any{"method": "eparakstsMobile"},
-		tc.WithCookie("portal_session", sid),
-		tc.WithHeader("X-CSRF-Token", csrf),
-	)
-	qt.Assert(t, qt.IsNil(err))
-	body, _ := resp.BodyUncompressed()
-	status := resp.StatusCode()
-	fasthttp.ReleaseResponse(resp)
-	qt.Assert(t, qt.Equals(status, fasthttp.StatusOK), qt.Commentf("%s", body))
-
-	got := <-sent
-	qt.Check(t, qt.Equals(got["refresh_token"], any("refresh-handle-9")))
-	qt.Check(t, qt.Equals(got["client_id"], any("portal-spa")))
-	_, named := got["session_id"]
-	qt.Check(t, qt.IsFalse(named))
-
-	// The elevation is parked under this browser's value, as a sign-in is: its
-	// return in another browser names nothing.
-	state, _ := got["state"].(string)
-	_, err = app.Sessions().TakeFlow(context.Background(), state)
-	qt.Check(t, qt.ErrorIs(err, session.ErrNotFound))
-	flow, err := app.Sessions().TakeFlow(context.Background(), session.FlowKey(state, tc.Cookies()[signInCookieName]))
-	qt.Assert(t, qt.IsNil(err))
-	qt.Check(t, qt.Equals(flow.SessionID, sid))
 }
 
 // A sign-out the Auth Service refuses or cannot take still signs the person out

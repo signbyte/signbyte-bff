@@ -3,6 +3,17 @@
 Notable changes to this service, newest first, per release. This file is written for whoever
 runs the service or integrates against it.
 
+## v0.4.0
+
+### Removed — the step-up (breaking change)
+
+- **Breaking change: `POST /api/portal/v1/step-up` is gone** and answers `404`. A session's sign-in method is fixed;
+  where the app needs another proof (adding an archive timestamp to a session that holds no captured certificate),
+  it starts a fresh sign-in at `POST /api/portal/v1/login/start` naming the session's own method, which makes a new
+  session with what that sign-in captured.
+- **A step-up begun before the upgrade raises nothing:** its return to `/api/portal/v1/login/callback` is answered
+  with `error=login_failed`, the code is not redeemed, and the session it named stays as it was.
+
 ## v0.3.2
 
 ### Removed — the card sign-in's own routes

@@ -204,29 +204,6 @@ func TestASignInParkedWithoutABindingIsRefused(t *testing.T) {
 	qt.Check(t, qt.Equals(tokens, 0))
 }
 
-func TestAnElevationReturnInAnotherBrowserElevatesNothing(t *testing.T) {
-	app, ta, _ := signInApp(t)
-	ctx := context.Background()
-	const sid = "sid-elevated"
-	qt.Assert(t, qt.IsNil(app.Sessions().PutSession(ctx, sid, &session.Session{
-		Subject: "user-1", AccessToken: "old", AccessExpiry: 1 << 62, CSRF: "csrf-1", RefreshToken: "refresh-0",
-	})))
-	starter := ta.TestClient()
-	startSignIn(t, starter)
-	parkFlow(t, app, session.FlowKey("state-step-up", starter.Cookies()[signInCookieName]), session.Flow{SessionID: sid})
-
-	stranger := ta.TestClient()
-	qt.Check(t, qt.IsTrue(strings.Contains(returnTo(t, stranger, codeFor("state-step-up")), "error=expired")))
-	sess, err := app.Sessions().GetSession(ctx, sid)
-	qt.Assert(t, qt.IsNil(err))
-	qt.Check(t, qt.Equals(sess.RefreshToken, "refresh-0"))
-
-	qt.Check(t, qt.Equals(returnTo(t, starter, codeFor("state-step-up")), "http://localhost:8080/"))
-	sess, err = app.Sessions().GetSession(ctx, sid)
-	qt.Assert(t, qt.IsNil(err))
-	qt.Check(t, qt.Equals(sess.RefreshToken, "refresh-1"))
-}
-
 func TestASignInMustBeAFreshOne(t *testing.T) {
 	for _, tc := range []struct {
 		name    string

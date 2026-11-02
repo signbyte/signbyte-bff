@@ -32,13 +32,13 @@ type Configuration struct {
 	// (AUTH_ISSUER_URL), this service's own audience, and the sender-constraint /
 	// key-cache defaults. The issuer is used for three things, all against the same
 	// address so the sender-constraint proof matches: the browser-facing
-	// authorization redirect, the server-side token + identity + step-up calls this
+	// authorization redirect, the server-side token + identity + revocation calls this
 	// service makes, and the proof URL bound into each of those calls. It is also
 	// the basis for the outbound delegated-token client.
 	Auth *authclient.Configuration `mapstructure:"auth"`
 
 	// AuthInternalURL is the in-network address this service reaches the Auth Service
-	// at for the server-side token, identity, and step-up calls, and the address
+	// at for the server-side token, identity and revocation calls, and the address
 	// bound into each proof (so it matches what the Auth Service reconstructs). Empty
 	// falls back to the issuer URL (when no reverse proxy sits between them).
 	AuthInternalURL string `mapstructure:"auth_internal_url" validate:"omitempty,url"`
@@ -56,8 +56,8 @@ type Configuration struct {
 	AuthClientID    string `mapstructure:"auth_client_id" validate:"required"`
 	AuthRedirectURI string `mapstructure:"auth_redirect_uri" validate:"required,url"`
 
-	// PostLoginURL is where the browser is sent after a successful login or session
-	// elevation (the single-page app's entry point). Required.
+	// PostLoginURL is where the browser is sent after a successful login (the
+	// single-page app's entry point). Required.
 	PostLoginURL string `mapstructure:"post_login_url" validate:"required,url"`
 
 	// SigningReturnBaseURL is the app origin the signing provider returns the browser

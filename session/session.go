@@ -29,7 +29,7 @@ func FlowKey(state, binding string) string {
 	return state + "." + base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
-// Flow is the state of a login (or session elevation) in progress, held between
+// Flow is the state of a sign-in in progress, held between
 // the authorization redirect and the callback and correlated by its FlowKey. It
 // carries the freshly generated signing-bound key and the proof-of-key verifier
 // the callback needs to complete the token exchange.
@@ -40,12 +40,8 @@ type Flow struct {
 	// Verifier is the proof-of-key-exchange secret the callback presents to the Auth
 	// Service to redeem the authorization code.
 	Verifier string `json:"verifier"`
-	// SessionID, when set, marks an elevation of an existing session rather than a
-	// fresh login: the callback updates that session's tokens in place.
-	SessionID string `json:"session_id,omitempty"`
 	// Nonce is the value a sign-in sent the Auth Service and its ID token must
-	// carry back; ACRValues the methods it named. Set for every sign-in, never for
-	// an elevation, which answers no ID token.
+	// carry back; ACRValues the methods it named. Set for every sign-in.
 	Nonce     string `json:"nonce,omitempty"`
 	ACRValues string `json:"acr_values,omitempty"`
 	// Started is when a sign-in began. Its ID token must name an authentication
@@ -64,8 +60,8 @@ type Session struct {
 	// Unix seconds, so the store can refresh it before use.
 	AccessToken  string `json:"access_token"`
 	AccessExpiry int64  `json:"access_expiry"`
-	// RefreshToken re-issues the access token within the session; it is also the
-	// upstream session handle used for step-up.
+	// RefreshToken re-issues the access token within the session, and names it to
+	// the Auth Service when the session is signed out.
 	RefreshToken string `json:"refresh_token"`
 	// Subject is the logged-in person's stable identifier.
 	Subject string `json:"subject"`

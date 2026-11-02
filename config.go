@@ -43,6 +43,12 @@ type Configuration struct {
 	// falls back to the issuer URL (when no reverse proxy sits between them).
 	AuthInternalURL string `mapstructure:"auth_internal_url" validate:"omitempty,url"`
 
+	// AuthIssuer is the Auth Service's issuer identifier, exactly as its discovery
+	// document states it: a sign-in's return and its ID token must name it. Empty
+	// means the issuer URL; set it where the browser reaches the Auth Service at
+	// another address than its issuer.
+	AuthIssuer string `mapstructure:"auth_issuer" validate:"omitempty,url"`
+
 	// AuthClientID is the public client id this service presents to the Auth Service
 	// when it runs the authorization-code flow for a user. AuthRedirectURI is the
 	// callback the Auth Service redirects the browser back to after authentication;
@@ -158,6 +164,7 @@ func (c *Configuration) Bind(_ string, v *viper.Viper) {
 	// Upstream Auth Service public client.
 	v.SetDefault("auth_client_id", "portal-spa")
 	_ = v.BindEnv("auth_internal_url", "AUTH_INTERNAL_URL")
+	_ = v.BindEnv("auth_issuer", "AUTH_ISSUER")
 	_ = v.BindEnv("auth_client_id", "AUTH_CLIENT_ID")
 	_ = v.BindEnv("auth_redirect_uri", "AUTH_REDIRECT_URI")
 	_ = v.BindEnv("post_login_url", "POST_LOGIN_URL")
@@ -237,6 +244,16 @@ func (c *Configuration) Validate(valid *validation.Validate) error {
 // IssuerURL is the public upstream Auth Service base URL (browser authorization
 // redirect + the trusted token issuer).
 func (c *Configuration) IssuerURL() string { return c.Auth.IssuerURL }
+
+// SignInIssuer is the issuer a sign-in's return and its ID token must name: the
+// explicit one, else the issuer URL.
+func (c *Configuration) SignInIssuer() string {
+	if u := strings.TrimSpace(c.AuthIssuer); u != "" {
+		return strings.TrimSuffix(u, "/")
+	}
+
+	return strings.TrimSuffix(c.Auth.IssuerURL, "/")
+}
 
 // InternalURL is the in-network Auth Service address for server-side calls + the
 // proof URL; falls back to the issuer URL when not separately configured.

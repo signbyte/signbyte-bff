@@ -8,11 +8,11 @@ import (
 	"testing"
 
 	api "github.com/signbyte/signbyte-bff"
-	"github.com/signbyte/signbyte-bff/asclient"
 	"github.com/signbyte/signbyte-bff/clients"
 	"github.com/signbyte/signbyte-bff/session"
 
 	"azugo.io/azugo"
+	"github.com/gmb-lib/go-authbyte/asclient"
 	"github.com/go-quicktest/qt"
 	"github.com/valyala/fasthttp"
 )

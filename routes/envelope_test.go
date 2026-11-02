@@ -60,11 +60,14 @@ func (d *routingDoer) DoServiceOnBehalf(_ context.Context, _, _, _, _, method, f
 
 // fakeAccessToken builds an unsigned JWT-shaped token carrying only the
 // serial_number claim asclient.SerialFromToken reads — enough to drive the
-// "which slot is yours" matching without a real Auth Service.
+// "which slot is yours" matching without a real Auth Service. The reader parses
+// it as a token, so its header names an algorithm and its signature segment
+// decodes, as every issued token's do.
 func fakeAccessToken(serial string) string {
 	payload, _ := json.Marshal(map[string]string{"serial_number": serial})
+	enc := base64.RawURLEncoding.EncodeToString
 
-	return "h." + base64.RawURLEncoding.EncodeToString(payload) + ".s"
+	return enc([]byte(`{"alg":"none"}`)) + "." + enc(payload) + ".sig"
 }
 
 // putSession seeds a logged-in session with a far-future token (no refresh) and a
@@ -254,9 +257,9 @@ func TestSignSlotNotEligible(t *testing.T) {
 }
 
 // TestSignSlotWebEidThreadsCerts proves a per-slot in-browser (webEid) signing
-// threads the app's signing certificate and the auth certificate captured at card
-// login down to the orchestrator (Layer 1/2), so envelope slots can be signed
-// with the card.
+// threads the app's signing certificate and the card's auth certificate, which
+// the Auth Service returned in the card sign-in's capabilities, down to the
+// orchestrator (Layer 1/2), so envelope slots can be signed with the card.
 func TestSignSlotWebEidThreadsCerts(t *testing.T) {
 	app := api.TestApp(t)
 	qt.Assert(t, qt.IsNil(Init(app)))
@@ -273,7 +276,7 @@ func TestSignSlotWebEidThreadsCerts(t *testing.T) {
 	const sid, csrf = "slot-webeid-sid", "slot-webeid-csrf"
 	err := app.Sessions().PutSession(context.Background(), sid, &session.Session{
 		Subject: "user-1", AccessToken: "tok", AccessExpiry: 1 << 62, CSRF: csrf,
-		SigningAuthCert: "MIIauthFromLogin",
+		Capabilities: &session.Capabilities{AuthCertificate: "MIIauthFromLogin"},
 	})
 	qt.Assert(t, qt.IsNil(err))
 

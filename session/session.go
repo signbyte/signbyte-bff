@@ -8,18 +8,31 @@ package session
 import (
 	"context"
 	"crypto/ecdsa"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
 	"errors"
+	"time"
 )
 
 // ErrNotFound is returned when a session or login flow is absent or expired.
 var ErrNotFound = errors.New("session: not found")
 
+// FlowKey is the key a login flow is parked and taken under: its state joined to
+// the hash of the binding value held by the browser that started it. A return
+// carrying the state without that browser's value names no flow, so it is
+// refused and the flow it names stays where it is. Only the hash is stored, so
+// what the store holds cannot be replayed as a browser's value.
+func FlowKey(state, binding string) string {
+	sum := sha256.Sum256([]byte(binding))
+
+	return state + "." + base64.RawURLEncoding.EncodeToString(sum[:])
+}
+
 // Flow is the state of a login (or session elevation) in progress, held between
-// the authorization redirect and the callback and correlated by the opaque state
-// value. It carries the freshly generated signing-bound key and the proof-of-key
-// verifier the callback needs to complete the token exchange.
+// the authorization redirect and the callback and correlated by its FlowKey. It
+// carries the freshly generated signing-bound key and the proof-of-key verifier
+// the callback needs to complete the token exchange.
 type Flow struct {
 	// Key is the per-session signing-bound private key (serialized), generated at
 	// login start and carried into the session so the issued tokens stay bound to it.
@@ -30,6 +43,14 @@ type Flow struct {
 	// SessionID, when set, marks an elevation of an existing session rather than a
 	// fresh login: the callback updates that session's tokens in place.
 	SessionID string `json:"session_id,omitempty"`
+	// Nonce is the value a sign-in sent the Auth Service and its ID token must
+	// carry back; ACRValues the methods it named. Set for every sign-in, never for
+	// an elevation, which answers no ID token.
+	Nonce     string `json:"nonce,omitempty"`
+	ACRValues string `json:"acr_values,omitempty"`
+	// Started is when a sign-in began. Its ID token must name an authentication
+	// no earlier than this, since every sign-in here asks for a fresh one.
+	Started time.Time `json:"started,omitzero"`
 }
 
 // Session is a logged-in browser session held server-side. The cookie carries
@@ -51,12 +72,6 @@ type Session struct {
 	// CSRF is the per-session token the browser must echo on every state-changing
 	// request, defending the cookie session against cross-site request forgery.
 	CSRF string `json:"csrf"`
-	// SigningAuthCert is the card authentication certificate captured at eID-card
-	// login (the login token's unverifiedCertificate), reused as the finalize auth
-	// certificate when signing so the card is not authenticated a second time at
-	// signing. A public certificate, session-scoped (gone on logout/expiry); empty
-	// for non-card logins.
-	SigningAuthCert string `json:"signing_auth_cert,omitempty"`
 	// Capabilities is the signing-capability set the auth service captured at
 	// login and returned on the code exchange: the signing identity this login
 	// method uses, its certificate, the auth certificate, and the person's
@@ -88,11 +103,11 @@ type Seal struct {
 
 // Store persists login flows and sessions with a bounded lifetime.
 type Store interface {
-	// PutFlow stores a login flow under the opaque state value, with the flow TTL.
-	PutFlow(ctx context.Context, state string, f *Flow) error
-	// TakeFlow atomically returns and removes the flow for state (single use).
+	// PutFlow stores a login flow under its key (FlowKey), with the flow TTL.
+	PutFlow(ctx context.Context, key string, f *Flow) error
+	// TakeFlow atomically returns and removes the flow under key (single use).
 	// Returns ErrNotFound if absent or expired.
-	TakeFlow(ctx context.Context, state string) (*Flow, error)
+	TakeFlow(ctx context.Context, key string) (*Flow, error)
 
 	// PutSession stores (or replaces) a session under its id, with the session TTL.
 	PutSession(ctx context.Context, id string, s *Session) error

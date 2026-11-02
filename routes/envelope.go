@@ -7,10 +7,10 @@ import (
 	"azugo.io/azugo"
 	"github.com/valyala/fasthttp"
 
+	"github.com/gmb-lib/go-authbyte/asclient"
 	"github.com/gmb-lib/go-authbyte/identitycode"
 	pkerrors "github.com/gmb-lib/go-platform-kit/errors"
 
-	"github.com/signbyte/signbyte-bff/asclient"
 	"github.com/signbyte/signbyte-bff/clients"
 	"github.com/signbyte/signbyte-bff/routes/request"
 	"github.com/signbyte/signbyte-bff/session"
@@ -596,13 +596,14 @@ func (r *router) signEnvelopeSlot(ctx *azugo.Context) {
 	}
 
 	// The in-browser flow needs both card certificates. The signing certificate is a
-	// PIN-less card read the app supplies; the authentication certificate is reused
-	// from the card login (captured in the session) so the card is not authenticated
-	// a second time at signing — falling back to an app-supplied one if present.
+	// PIN-less card read the app supplies; the authentication certificate is the
+	// card sign-in's, which the Auth Service returned in the session's capabilities,
+	// so the card is not authenticated a second time at signing — an app-supplied
+	// one wins if present.
 	authCert := req.AuthCertificate
 	_, sess := sessionFromCtx(ctx)
-	if authCert == "" && sess != nil {
-		authCert = sess.SigningAuthCert
+	if authCert == "" && sess != nil && sess.Capabilities != nil {
+		authCert = sess.Capabilities.AuthCertificate
 	}
 
 	// Redirect flows: thread the login-captured identity so the signing

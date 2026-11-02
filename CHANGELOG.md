@@ -3,6 +3,132 @@
 Notable changes to this service, newest first, per release. This file is written for whoever
 runs the service or integrates against it.
 
+## v0.3.2
+
+### Removed — the card sign-in's own routes
+
+`POST /api/portal/v1/login/webeid/start` and `POST /api/portal/v1/login/webeid/complete` are gone and answer `404`.
+A card sign-in now starts like every other one, naming the card:
+
+```http
+POST /api/portal/v1/login/start
+{"acr_values": "webEid"}
+```
+
+authbyte reads the card on its own sign-in page (from authbyte v0.4.0), and the browser comes back to
+`/api/portal/v1/login/callback` with a code. Card signing takes the card's authentication certificate from the
+sign-in's signing capabilities, which authbyte returns for a card sign-in; a session made by the removed routes
+still carries those, so a card session signed in before this version keeps signing. Needs signbyte-spa v0.4.1,
+whose card button starts the sign-in this way.
+
+### Security — every cookie is `__Host-` and read by its own name
+
+Over TLS, and in every environment but `development`, the cookies are named `__Host-portal_session`,
+`__Host-portal_csrf` and `__Host-portal_signin`, set `Secure`, `Path=/` and without a Domain, and each is read under
+that exact name only. Before this, each was read by its plain name, which the framework resolves to a `__Host-` or
+`__Secure-` copy first, so whoever could set a cookie for this host — a page on a sibling host, or anyone on the network
+path — could plant a session or a sign-in binding of their own and have it read. Sign-out clears the cookies with
+`Secure`, as the prefix requires. A `development` edge reached over plain HTTP keeps the plain names. **Everyone signed
+in when this version starts signs in once more** (the plain-named cookie is no longer read), and a sign-in in progress
+is refused once with `expired`. The application reads the anti-forgery cookie under the new name from signbyte-spa
+v0.4.1.
+
+### Security — a sign-in belongs to the browser that started it
+
+Every sign-in — by redirect, by card, and a step-up — sets a short-lived, http-only, `SameSite=Lax` cookie,
+`portal_signin`, when it starts, and is parked under its state together with the hash of that cookie's value. The
+return to `/login/callback` and the card completion find it only with the same browser's cookie: a return address
+opened in another browser lands on the `expired` marker (the card completion answers `400 err:session:flowExpired`)
+with no session, and the sign-in stays open for the browser that started it. Before this, a return address opened in
+any browser signed that browser in as whoever had started the sign-in. A browser keeps its value across sign-ins, so
+two started in two tabs both finish; the cookie lives for `FLOW_TTL` and is never cleared. A sign-in in progress when
+this version starts is refused once with `expired`, and the person starts again.
+
+### Changed — every sign-in is a fresh one
+
+The sign-in asks authbyte for `prompt=login` and `max_age=0`, and its ID token's `auth_time` must not be earlier than
+the moment the sign-in started (allowing `go-authbyte`'s 30-second clock skew); a card sign-in is checked the same way
+from its challenge. A signature rests on this sign-in, so on a shared browser the provider is asked not to let its own
+session answer the next person's sign-in. A provider that ignores `prompt=login` and names an authentication earlier
+than the request is refused by authbyte, and the person sees the sign-in fail; one that ignores it and names no
+authentication time cannot be told apart here.
+
+### Changed — a sign-in is proven by its ID token
+
+On `go-authbyte` v0.36.0, every sign-in, by redirect and by card, asks authbyte for an ID token with a nonce kept with
+the parked flow, and establishes a session only when that ID token passes the library's check: authbyte's issuer, this
+client as its only audience, authbyte's signature, the nonce, and a method among the ones asked for. A sign-in that
+fails it ends the session authbyte opened: a redirect sign-in lands on the app with `error=login_failed`, a card
+sign-in's completion answers `502 err:upstream:unavailable`. The browser's return must
+name authbyte's issuer (`iss`, RFC 9207) or its code is never redeemed and its error is not read. A step-up answers no
+ID token and is redeemed as before. The login no longer sends `prompt=login`: authbyte refuses a sign-in completed with
+a method the request did not name, which is what the parameter was there for.
+
+**`acr_values` on `POST /api/portal/v1/login/start` takes authbyte's method names**, `eparakstsMobile` or `eidScan`,
+no longer the provider's codes. **Needs an authbyte that issues ID tokens and names its issuer in its returns**; the
+issuer checked is `AUTH_ISSUER_URL`, unless the new optional `AUTH_ISSUER` names it, for a deployment where the
+browser reaches authbyte at another address than its issuer.
+
+### Changed — the sign-in client proves itself with the service's secret
+
+On `go-authbyte` v0.35.0, the sign-in client (`AUTH_CLIENT_ID`) sends `SERVICE_CLIENT_SECRET` to authbyte by HTTP
+Basic at the code exchange, refresh and revocation, and in the step-up's body. **Run it against authbyte's per-client
+registry, where the sign-in client's row is `type: confidential` with the same secret as the service client's row:**
+authbyte refuses a client that sends a secret its row does not hold, and a confidential row refuses one that sends
+none. The configuration does not change.
+
+A security release. A token exchanged for one sign-in is no longer reused for another, a sign-out no longer puts
+the session's refresh token in the browser's address, and **the service now builds with Go 1.27.3**. Nothing about
+the API, the configuration or the database changes.
+
+**Needs authbyte v0.3.0 or later**, which ends a session at `POST /revoke` and names a step-up's session by
+`refresh_token`; an older authbyte refuses this service's step-up.
+
+### Security
+
+- **Sign-out ends the session at authbyte server to server, and the browser's address names no session.** The
+  logout answer's `logoutUrl` used to carry the session's refresh token (`sid=`), so it reached the browser's
+  history and any log of that address. Now `POST /api/portal/v1/logout` first ends the session at authbyte with the
+  refresh token and a proof of the session's key, then answers a `logoutUrl` holding only the client, the landing
+  address and the login method (`login_method=`, which decides whether the browser passes through the identity
+  provider's logout). A refusal or an outage at authbyte is logged and does not keep the person signed in here.
+- **A step-up names the session to authbyte by its refresh token** (`refresh_token`; it was `session_id`).
+
+- **The authentication library moves to `go-authbyte` v0.31.1.** It caches a token exchanged on a user's behalf
+  under that user's own token, not under the person alone, and stops reusing it once the user's token has expired.
+  Before, a person who signed in again, with another method or into another organisation, could have this
+  service's calls to the domain services carried for a few minutes by the token exchanged for the earlier sign-in.
+  This service had guarded the sign-in method half of that itself, by adding the login method and assurance level
+  to the cache key; that guard is removed, since the library now covers every claim the token carries. Nothing to
+  configure; one more exchange per renewed sign-in.
+- **Go 1.27.3** (was 1.27.2), in `go.mod` and as the image's default build toolchain (`ARG GO_VERSION` in the
+  `Dockerfile`). Go 1.27.3 fixes GO-2026-6809 in `crypto/x509`, which code making TLS calls reaches. **Rebuild the
+  image to pick the fix up.**
+- **The public verify route's abuse-evidence event now names its own request's caller.** The event is posted in
+  the background after the answer has gone out, and it took the caller's address, user agent and correlation id
+  as read off the request, which share a buffer the server reuses for the next request on the connection. An
+  event could therefore reach the audit service carrying another caller's address or user agent, or garbled
+  bytes. The event now holds copies of its own.
+- **Access records and correlation ids keep their own request's values** (`go-gdpr-audit` v1.1.8, `go-platform-kit`
+  v1.11.6). An access record queued while the access audit was unreachable, and the correlation id carried on
+  traces, audit records and background calls, could name another request's document, person or id. Both libraries
+  now keep copies of their own.
+
+### Fixed
+
+- **Development only, without `REDIS_URL`:** the in-memory session store keeps its own copy of each session id and
+  login-flow state it stores. A token refresh stored the session again under the id as read from the cookie,
+  which shares a buffer the server reuses, so the session could end up filed under another value and be lost.
+
+### Changed
+
+- **The client for authbyte is now `go-authbyte`'s `asclient`.** This service's own copy is gone. Sign-in, refresh,
+  step-up, sign-out and the signing capabilities a sign-in hands over work as before, and the identity code that
+  marks a person's own signer slot is still compared in its one stored spelling.
+- **Libraries:** azugo → v0.40.2, go-authbyte → v0.34.0, go-docgate → v1.0.6, go-gdpr-audit → v1.1.8,
+  go-platform-kit → v1.11.6, go-sec-events → v1.2.3, go-validation-answer → v1.1.4, `fasthttp` → v1.77.0, `pdfcpu` →
+  v0.16.4, `valkey-go` → v1.0.79, `go-jose` → v4.1.7, plus their indirect modules.
+
 ## v0.3.1
 
 A security release. **The service now builds with Go 1.27.2**, and its libraries move to their Go

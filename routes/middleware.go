@@ -25,11 +25,11 @@ const csrfHeader = "X-CSRF-Token"
 // closed when it is absent or expired. On state-changing requests it also requires
 // the anti-forgery token to match the one minted for this session.
 func (r *router) requireSession() azugo.RequestHandlerFunc {
-	cookieName := r.Config().CookieName
+	sessionCookie := r.Config().CookieName
 
 	return func(next azugo.RequestHandler) azugo.RequestHandler {
 		return func(ctx *azugo.Context) {
-			sid := ctx.Cookie.Get(cookieName)
+			sid := readCookie(ctx, sessionCookie)
 			if sid == "" {
 				ctx.Error(pkerrors.NewProblem("err:session:unauthorized",
 					pkerrors.WithDetail("no session")))
@@ -39,7 +39,7 @@ func (r *router) requireSession() azugo.RequestHandlerFunc {
 
 			sess, err := r.Sessions().GetSession(ctx, sid)
 			if err != nil {
-				clearSessionCookies(ctx, cookieName)
+				clearSessionCookies(ctx, sessionCookie)
 				ctx.Error(pkerrors.NewProblem("err:session:unauthorized",
 					pkerrors.WithDetail("session expired")))
 

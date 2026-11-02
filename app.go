@@ -24,12 +24,12 @@ import (
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 
+	"github.com/gmb-lib/go-authbyte/asclient"
 	"github.com/gmb-lib/go-authbyte/authclient"
 	"github.com/gmb-lib/go-gdpr-audit/gdpr"
 	"github.com/gmb-lib/go-platform-kit/platform"
 	"github.com/gmb-lib/go-sec-events/secevents"
 
-	"github.com/signbyte/signbyte-bff/asclient"
 	"github.com/signbyte/signbyte-bff/audit"
 	"github.com/signbyte/signbyte-bff/clients"
 	"github.com/signbyte/signbyte-bff/session"
@@ -168,7 +168,10 @@ func (a *App) init() error {
 	}
 
 	// The upstream Auth Service client: the browser login + token + identity flow.
-	a.as = asclient.New(cfg.IssuerURL(), cfg.InternalURL(), cfg.AuthClientID, cfg.AuthRedirectURI)
+	// Its sign-in client is confidential and proves itself with this edge's own
+	// service secret; a sign-in's return and its ID token must name the issuer.
+	a.as = asclient.New(cfg.IssuerURL(), cfg.InternalURL(), cfg.AuthClientID, cfg.AuthRedirectURI,
+		asclient.WithClientSecret(cfg.ServiceClientSecret), asclient.WithIssuer(cfg.SignInIssuer()))
 
 	// Outbound delegated-token client — mints downstream tokens carrying the user's
 	// identity for the composed service calls. Built only when at least one

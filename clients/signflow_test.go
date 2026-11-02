@@ -33,25 +33,6 @@ func TestBeginSigningOnBehalf(t *testing.T) {
 	qt.Assert(t, qt.Equals(d.lastTimeout, slowOpTimeout))
 }
 
-// TestOnBehalfBindingScopesCacheKey proves the login binding is folded into the
-// subject the delegated-token cache keys on, so the same person logging in with a
-// different method gets a distinct cache entry (and never a token bound to the old
-// method) — while Sub itself stays the pure subject.
-func TestOnBehalfBindingScopesCacheKey(t *testing.T) {
-	d := &stubDoer{resp: &authclient.BackgroundResponse{StatusCode: 200, Body: []byte(`{}`)}}
-	sf := NewSignflow(d, "http://signflow:8080", "svc:signflow")
-
-	_, _ = sf.Status(context.Background(), OnBehalf{Sub: "user-1", Token: "t", Binding: "lm:webEid|loa:high"}, "job-1", 0)
-	qt.Check(t, qt.Equals(d.lastSub, "user-1|lm:webEid|loa:high"))
-
-	_, _ = sf.Status(context.Background(), OnBehalf{Sub: "user-1", Token: "t", Binding: "lm:eidScan|loa:high"}, "job-1", 0)
-	qt.Check(t, qt.Equals(d.lastSub, "user-1|lm:eidScan|loa:high"))
-
-	// No binding → subject-only key (unchanged behaviour).
-	_, _ = sf.Status(context.Background(), OnBehalf{Sub: "user-1", Token: "t"}, "job-1", 0)
-	qt.Check(t, qt.Equals(d.lastSub, "user-1"))
-}
-
 // TestBeginSigningWebEidRelaysCertsAndParsesDigests proves the in-browser flow in
 // both directions: the card certificates are marshalled into the outbound request,
 // and the signature algorithm + per-document digests are parsed from the response.

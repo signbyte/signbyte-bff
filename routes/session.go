@@ -1,19 +1,25 @@
 package routes
 
 import (
+	"crypto/ecdsa"
+	"regexp"
 	"time"
 
 	"azugo.io/azugo"
 	"github.com/valyala/fasthttp"
 	"go.uber.org/zap"
 
+	"github.com/gmb-lib/go-authbyte/asclient"
 	pkerrors "github.com/gmb-lib/go-platform-kit/errors"
 
-	"github.com/signbyte/signbyte-bff/asclient"
 	"github.com/signbyte/signbyte-bff/routes/request"
 	"github.com/signbyte/signbyte-bff/routes/response"
 	"github.com/signbyte/signbyte-bff/session"
 )
+
+// methodNames is acr_values as this service passes it on: one sign-in method's
+// name, or a few separated by single spaces.
+var methodNames = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]{0,63}( [A-Za-z][A-Za-z0-9]{0,63}){0,7}$`)
 
 // refreshLeeway refreshes the access token this long before it expires.
 const refreshLeeway = 30 * time.Second
@@ -23,8 +29,9 @@ const refreshLeeway = 30 * time.Second
 const csrfCookieName = "portal_csrf"
 
 // loginStart begins a login: it mints a fresh signing-bound key + proof-key
-// verifier + state, parks them server-side under the state, and returns the Auth
-// Service authorization URL for the browser to follow. Anonymous.
+// verifier + state, parks them server-side under the state bound to this browser
+// (the sign-in cookie), and returns the Auth Service authorization URL for the
+// browser to follow, asking for a fresh sign-in. Anonymous.
 //
 // @operationId PortalLoginStart
 // @title Begin login
@@ -38,6 +45,13 @@ func (r *router) loginStart(ctx *azugo.Context) {
 
 			return
 		}
+	}
+	if req.ACRValues != "" && !methodNames.MatchString(req.ACRValues) {
+		ctx.Error(pkerrors.NewProblem("err:request:invalid",
+			pkerrors.WithStatus(fasthttp.StatusBadRequest),
+			pkerrors.WithDetail("acr_values is not a list of sign-in method names")))
+
+		return
 	}
 
 	key, err := asclient.GenerateKey()
@@ -65,28 +79,72 @@ func (r *router) loginStart(ctx *azugo.Context) {
 
 		return
 	}
+	nonce, err := asclient.RandomToken(24)
+	if err != nil {
+		r.fail(ctx, err)
 
-	if err := r.Sessions().PutFlow(ctx, state, &session.Flow{Key: keyEnc, Verifier: verifier}); err != nil {
+		return
+	}
+
+	binding, err := bindBrowser(ctx, r.Config().FlowTTL)
+	if err != nil {
+		r.fail(ctx, err)
+
+		return
+	}
+
+	flow := &session.Flow{Key: keyEnc, Verifier: verifier, Nonce: nonce, ACRValues: req.ACRValues, Started: time.Now()}
+	if err := r.Sessions().PutFlow(ctx, session.FlowKey(state, binding), flow); err != nil {
 		r.fail(ctx, err)
 
 		return
 	}
 
 	ctx.JSON(&response.LoginStart{
-		AuthorizeURL: r.AuthService().AuthorizeURL(challenge, state, req.ACRValues),
-		State:        state,
+		AuthorizeURL: r.AuthService().AuthorizationURL(asclient.AuthorizationRequest{
+			CodeChallenge: challenge,
+			State:         state,
+			Nonce:         nonce,
+			ACRValues:     req.ACRValues,
+			Prompt:        "login",
+			MaxAge:        freshOnly(),
+		}),
+		State: state,
 	})
+}
+
+// freshOnly is the age of authentication a sign-in here accepts: none. A
+// signature rests on the sign-in, so the provider's own session must not answer
+// it for whoever uses the browser next; the ID token's auth_time proves it.
+func freshOnly() *time.Duration {
+	age := time.Duration(0)
+
+	return &age
 }
 
 // loginCallback lands the browser back from the Auth Service, redeems the code
 // for a session-key-bound token, establishes the cookie session, and sends the
-// browser on to the app. Anonymous (the state + proof-key verifier are the
-// guards). On any failure it redirects back with a generic marker.
+// browser on to the app. Anonymous (the state with the browser's sign-in cookie,
+// and the proof-key verifier, are the guards). On any failure it redirects back
+// with a generic marker.
 //
 // @operationId PortalLoginCallback
 // @title Login callback
 // @route /api/portal/v1/login/callback [get].
 func (r *router) loginCallback(ctx *azugo.Context) {
+	// A return that does not name the Auth Service's issuer is not its answer:
+	// neither its error nor its code is used.
+	iss := ""
+	if v := ctx.Query.StringOptional("iss"); v != nil {
+		iss = *v
+	}
+	if err := r.AuthService().CheckIssuer(iss); err != nil {
+		ctx.Log().Warn("login return does not name the auth service's issuer")
+		r.redirectWithError(ctx, "login_failed")
+
+		return
+	}
+
 	// The Auth Service propagates an IdP error here instead of a code. Map the
 	// known OAuth2 error code to a fixed marker so the SPA can distinguish a
 	// genuine user cancel from a provider-side failure; unknown codes default to
@@ -111,7 +169,16 @@ func (r *router) loginCallback(ctx *azugo.Context) {
 		return
 	}
 
-	flow, err := r.Sessions().TakeFlow(ctx, *state)
+	// The sign-in belongs to the browser that started it: a return without that
+	// browser's value names no flow, and the flow stays parked for its browser.
+	binding := browserBinding(ctx)
+	if binding == "" {
+		ctx.Log().Warn("login return without this browser's sign-in binding")
+		r.redirectWithError(ctx, "expired")
+
+		return
+	}
+	flow, err := r.Sessions().TakeFlow(ctx, session.FlowKey(*state, binding))
 	if err != nil {
 		r.redirectWithError(ctx, "expired")
 
@@ -125,7 +192,7 @@ func (r *router) loginCallback(ctx *azugo.Context) {
 		return
 	}
 
-	tokens, err := r.AuthService().ExchangeCode(ctx, key, *code, flow.Verifier)
+	tokens, err := r.exchangeFlow(ctx, key, *code, flow)
 	if err != nil {
 		ctx.Log().Warn("token exchange failed")
 		r.redirectWithError(ctx, "login_failed")
@@ -159,9 +226,7 @@ func (r *router) loginCallback(ctx *azugo.Context) {
 		return
 	}
 
-	// A redirect login (eParaksts Mobile / eID Scan) has no card auth certificate to
-	// capture; only the eID-card flow supplies one.
-	if err := r.establishSession(ctx, flow.Key, tokens, ""); err != nil {
+	if err := r.establishSession(ctx, flow.Key, tokens); err != nil {
 		r.fail(ctx, err)
 
 		return
@@ -171,11 +236,31 @@ func (r *router) loginCallback(ctx *azugo.Context) {
 	ctx.RedirectUnsafe(r.Config().PostLoginURL)
 }
 
+// exchangeFlow redeems a parked flow's authorization code. An elevation of a
+// session answers no ID token and is redeemed as it is; every other flow is a
+// sign-in, whose answer must carry an ID token proving it (its nonce, a method
+// it named, an authentication no earlier than the sign-in began), or no tokens
+// are returned — a sign-in parked without a nonce included.
+func (r *router) exchangeFlow(ctx *azugo.Context, key *ecdsa.PrivateKey, code string, flow *session.Flow) (*asclient.Tokens, error) {
+	if flow.SessionID != "" {
+		return r.AuthService().ExchangeCode(ctx, key, code, flow.Verifier)
+	}
+	tokens, _, err := r.AuthService().ExchangeSignIn(ctx, key, code, flow.Verifier, asclient.IDTokenCheck{
+		Nonce:     flow.Nonce,
+		ACRValues: flow.ACRValues,
+		MaxAge:    freshOnly(),
+		Started:   flow.Started,
+	})
+
+	return tokens, err
+}
+
 // establishSession mints a new cookie session from a freshly issued token set,
 // keyed to the per-session signing-bound key, and sets the browser cookies (the
-// http-only session id + the readable anti-forgery token). signingAuthCert is the
-// card auth certificate captured at eID-card login (empty for redirect logins).
-func (r *router) establishSession(ctx *azugo.Context, keyEnc string, tokens *asclient.Tokens, signingAuthCert string) error {
+// http-only session id + the readable anti-forgery token), keeping the signing
+// capabilities the Auth Service returned with the tokens (a card sign-in's carry
+// the card's authentication certificate).
+func (r *router) establishSession(ctx *azugo.Context, keyEnc string, tokens *asclient.Tokens) error {
 	sid, err := asclient.RandomToken(32)
 	if err != nil {
 		return err
@@ -186,12 +271,11 @@ func (r *router) establishSession(ctx *azugo.Context, keyEnc string, tokens *asc
 	}
 
 	sess := &session.Session{
-		Key:             keyEnc,
-		RefreshToken:    tokens.RefreshToken,
-		CSRF:            csrf,
-		Subject:         asclient.SubjectFromToken(tokens.AccessToken),
-		SigningAuthCert: signingAuthCert,
-		Capabilities:    capabilitiesFromTokens(tokens),
+		Key:          keyEnc,
+		RefreshToken: tokens.RefreshToken,
+		CSRF:         csrf,
+		Subject:      asclient.SubjectFromToken(tokens.AccessToken),
+		Capabilities: capabilitiesFromTokens(tokens),
 	}
 	applyTokens(sess, tokens)
 	if err := r.Sessions().PutSession(ctx, sid, sess); err != nil {
@@ -304,16 +388,29 @@ func (r *router) refresh(ctx *azugo.Context) {
 func (r *router) logout(ctx *azugo.Context) {
 	sid, sess := sessionFromCtx(ctx)
 
-	// Build the front-channel logout URL BEFORE deleting the session: the browser
-	// must navigate to the Auth Service so that, for an eParaksts-federated login, it
-	// bounces on through the IdP logout and clears its SSO cookie. Without this the
-	// IdP keeps its short-lived session and the next login is silently answered from
-	// it (the user cannot switch identity/method). The session's refresh token is the
-	// upstream handle that lets the Auth Service resolve the method + end its session.
+	// End the session at the Auth Service first, server to server, with the
+	// session's refresh token and key: the browser's address must never carry the
+	// token. A refusal or an outage there does not keep the person signed in here;
+	// the session there then ends at its own lifetime.
+	//
+	// Then build the front-channel logout URL: the browser must navigate to the
+	// Auth Service so that, for an eParaksts-federated login, it bounces on through
+	// the IdP logout and clears its SSO cookie. Without this the IdP keeps its
+	// short-lived session and the next login is silently answered from it (the user
+	// cannot switch identity/method). The login method decides that bounce.
 	logoutURL := ""
 	if sess != nil && r.AuthService() != nil {
+		if key, err := session.ParseKey(sess.Key); err == nil && sess.RefreshToken != "" {
+			if err := r.AuthService().Revoke(ctx, key, sess.RefreshToken); err != nil {
+				ctx.Log().Warn("the authentication service did not end the session at sign-out")
+			}
+		}
 		if redirect := r.Config().LogoutRedirectURI(); redirect != "" {
-			logoutURL = r.AuthService().LogoutURL(redirect, sess.RefreshToken)
+			loginMethod := ""
+			if cl, err := asclient.ParseUnverified(sess.AccessToken); err == nil {
+				loginMethod = cl.LoginMethod
+			}
+			logoutURL = r.AuthService().BrowserLogoutURL(redirect, loginMethod)
 		}
 	}
 
@@ -362,8 +459,15 @@ func (r *router) stepUp(ctx *azugo.Context) {
 		return
 	}
 
+	binding, err := bindBrowser(ctx, r.Config().FlowTTL)
+	if err != nil {
+		r.fail(ctx, err)
+
+		return
+	}
+
 	// Park the elevation flow so the callback updates this session in place.
-	if err := r.Sessions().PutFlow(ctx, state, &session.Flow{Key: sess.Key, Verifier: verifier, SessionID: sid}); err != nil {
+	if err := r.Sessions().PutFlow(ctx, session.FlowKey(state, binding), &session.Flow{Key: sess.Key, Verifier: verifier, SessionID: sid}); err != nil {
 		r.fail(ctx, err)
 
 		return
@@ -378,7 +482,7 @@ func (r *router) stepUp(ctx *azugo.Context) {
 	}
 
 	body, status, err := r.AuthService().StepUp(ctx, key, token, asclient.StepUpRequest{
-		SessionID:     sess.RefreshToken,
+		RefreshToken:  sess.RefreshToken,
 		ClientID:      r.Config().AuthClientID,
 		Method:        req.Method,
 		CodeChallenge: challenge,

@@ -40,15 +40,11 @@ func Init(a *portalapi.App) error {
 
 	v1 := a.Group("/api/portal/v1")
 
-	// Session establishment (anonymous): start a login, land the callback.
+	// Session establishment (anonymous): start a login, land the callback. Every
+	// way signs in this way, the card too: it is read on the Auth Service's own
+	// sign-in page.
 	v1.Post("/login/start", r.loginStart)
 	v1.Get("/login/callback", r.loginCallback)
-
-	// eID-card login (anonymous): the card handshake runs in the browser, proxied
-	// here so the app talks only to this service. Start issues the card challenge;
-	// complete redeems the card token and establishes the session.
-	v1.Post("/login/webeid/start", r.loginWebEIDStart)
-	v1.Post("/login/webeid/complete", r.loginWebEIDComplete)
 
 	// Public verify (anonymous by design): anyone may check a signed document
 	// without an account. No session/CSRF — the anonymous-abuse gap is closed

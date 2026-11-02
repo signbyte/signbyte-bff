@@ -49,6 +49,13 @@ func TestInternalURLFallsBackToIssuer(t *testing.T) {
 	qt.Check(t, qt.Equals(c.InternalURL(), "https://issuer.example"))
 }
 
+func TestSignInIssuerIsTheIssuerURLUnlessNamed(t *testing.T) {
+	c := &Configuration{Auth: &authclient.Configuration{IssuerURL: "http://auth:8080"}}
+	qt.Check(t, qt.Equals(c.SignInIssuer(), "http://auth:8080"))
+	c.AuthIssuer = "https://localhost:5001"
+	qt.Check(t, qt.Equals(c.SignInIssuer(), "https://localhost:5001"))
+}
+
 func TestLogoutRedirectURIDerivesLandingScreenFromPostLogin(t *testing.T) {
 	c := &Configuration{}
 	c.PostLoginURL = "https://app.example/dashboard"
@@ -111,4 +118,11 @@ func TestGDPRConfigMapsAccessAuditSettings(t *testing.T) {
 	qt.Check(t, qt.Equals(out.Timeout, gdpr.DefaultTimeout))
 	qt.Check(t, qt.Equals(out.OutboxCapacity, gdpr.DefaultOutboxCapacity))
 	qt.Check(t, qt.Equals(out.MaxRetries, gdpr.DefaultMaxRetries))
+}
+
+func TestSignInIssuerHasNoTrailingSlash(t *testing.T) {
+	c := &Configuration{Auth: &authclient.Configuration{IssuerURL: "https://localhost:5001/"}}
+	qt.Check(t, qt.Equals(c.SignInIssuer(), "https://localhost:5001"))
+	c.AuthIssuer = "https://auth.example/"
+	qt.Check(t, qt.Equals(c.SignInIssuer(), "https://auth.example"))
 }

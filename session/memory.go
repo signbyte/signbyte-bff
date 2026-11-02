@@ -2,12 +2,16 @@ package session
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 )
 
 // memoryStore is an in-process session store for development and tests. It does
 // not survive a restart and does not scale past one instance.
+//
+// It keeps a copy of every key it stores: a key read from the request (the
+// session cookie) points into a buffer the server reuses for the next request.
 type memoryStore struct {
 	mu         sync.Mutex
 	flows      map[string]entry
@@ -40,7 +44,7 @@ func (s *memoryStore) PutFlow(_ context.Context, state string, f *Flow) error {
 	}
 
 	s.mu.Lock()
-	s.flows[state] = entry{data: b, expires: s.now().Add(s.flowTTL)}
+	s.flows[strings.Clone(state)] = entry{data: b, expires: s.now().Add(s.flowTTL)}
 	s.mu.Unlock()
 
 	return nil
@@ -71,7 +75,7 @@ func (s *memoryStore) PutSession(_ context.Context, id string, sess *Session) er
 	}
 
 	s.mu.Lock()
-	s.sessions[id] = entry{data: b, expires: s.now().Add(s.sessionTTL)}
+	s.sessions[strings.Clone(id)] = entry{data: b, expires: s.now().Add(s.sessionTTL)}
 	s.mu.Unlock()
 
 	return nil

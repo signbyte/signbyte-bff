@@ -5,7 +5,7 @@ go 1.27.3
 require (
 	azugo.io/azugo v0.40.2
 	azugo.io/core v0.40.1
-	github.com/gmb-lib/go-authbyte v0.36.0
+	github.com/gmb-lib/go-authbyte v0.37.0
 	github.com/gmb-lib/go-docgate v1.0.6
 	github.com/gmb-lib/go-gdpr-audit v1.1.8
 	github.com/gmb-lib/go-platform-kit v1.11.6
@@ -23,7 +23,7 @@ require (
 	azugo.io/opentelemetry v0.40.1 // indirect
 	github.com/VictoriaMetrics/metrics v1.44.1 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
-	github.com/cenkalti/backoff/v7 v7.0.1 // indirect
+	github.com/cenkalti/backoff/v7 v7.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/dgraph-io/ristretto/v2 v2.4.2 // indirect
@@ -91,7 +91,7 @@ require (
 	go.opentelemetry.io/proto/otlp v1.11.1 // indirect
 	go.uber.org/atomic v1.12.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	go.yaml.in/yaml/v3 v3.0.5 // indirect
+	go.yaml.in/yaml/v3 v3.0.6 // indirect
 	golang.org/x/crypto v0.58.0 // indirect
 	golang.org/x/image v0.47.0 // indirect
 	golang.org/x/net v0.62.0 // indirect

@@ -50,7 +50,7 @@ type App struct {
 	sessions session.Store
 
 	// as drives the upstream Auth Service on the user's behalf: the authorization
-	// redirect, the code/refresh token exchange, the identity lookup, and step-up.
+	// redirect, the code/refresh token exchange, the identity lookup, and sign-out.
 	as *asclient.Client
 
 	// outboundClient mints downstream tokens carrying the user's identity (token

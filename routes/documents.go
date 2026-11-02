@@ -287,10 +287,9 @@ func (r *router) archiveTimestamp(ctx *azugo.Context) {
 	}
 	// No captured certificate on this session (an older session, a lost cache,
 	// a login whose capture failed): the fallback is to CAPTURE one — the app
-	// sends the user through a re-authentication (the step-up flow, same
-	// method), whose completion re-captures the session's capabilities; this
-	// call then succeeds on retry. Refused here, precisely, before any
-	// upstream traffic.
+	// starts a fresh sign-in with the session's own method, whose new session
+	// carries the capabilities it captured; this call then succeeds on retry.
+	// Refused here, precisely, before any upstream traffic.
 	if authCert == "" {
 		ctx.Error(pkerrors.NewProblem("err:signing:authCertificateRequired",
 			pkerrors.WithStatus(fasthttp.StatusConflict),

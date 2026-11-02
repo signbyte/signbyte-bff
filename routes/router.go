@@ -78,7 +78,6 @@ func Init(a *portalapi.App) error {
 	authed.Get("/me", r.me)
 	authed.Post("/session/refresh", r.refresh)
 	authed.Post("/logout", r.logout)
-	authed.Post("/step-up", r.stepUp)
 
 	// Document composition (on the user's behalf).
 	authed.Get("/dashboard", r.dashboard)

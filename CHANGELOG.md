@@ -3,6 +3,26 @@
 Notable changes to this service, newest first, per release. This file is written for whoever
 runs the service or integrates against it.
 
+## v0.5.0
+
+### Added
+
+- **`GET /api/portal/v1/sign-in-methods`** (anonymous): which ways of signing in this deployment offers, so a
+  sign-in page shows only those. The list is the Auth Service's own (`acr_values_supported` in its discovery
+  document), in its order, each name what the page sends as `acr_values` to `POST /api/portal/v1/login/start`:
+
+  ```json
+  {"methods":["eparakstsMobile","eidScan","webEid"]}
+  ```
+
+  It is read from the Auth Service at most once a minute. If it has never answered, the route returns
+  `503 err:upstream:unavailable`, never an empty list.
+- **The `legacyEid` signing flow** (the eID card signed in the browser through the eParaksts provider's own plugin
+  rather than Web eID) is signed in the browser like `webEid` at
+  `POST /api/portal/v1/envelopes/{id}/slots/{slot}/sign`: the request carries the card's `signingCertificate`, the
+  authentication certificate comes from the card sign-in, and the browser is never sent away. `/me` offers it only
+  to a sign-in that permits it, and only where the signing service runs it.
+
 ## v0.4.0
 
 ### Removed — the step-up (breaking change)

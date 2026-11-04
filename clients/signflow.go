@@ -42,7 +42,7 @@ type BeginInput struct {
 	SigFormat  string `json:"sigFormat"`
 	DocumentID string `json:"documentId"`
 	// SigningCertificate and AuthCertificate carry certificates for the
-	// signing act: the card certificates for the in-browser (webEid) flow, or
+	// signing act: the card certificates for the in-browser flows (webEid, legacyEid), or
 	// the login-captured identity certificates for a redirect flow (so the
 	// provider skips re-resolving them). Public certificates, request-scoped —
 	// never held or logged. Empty means the provider resolves its own.

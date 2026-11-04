@@ -45,6 +45,8 @@ func Init(a *portalapi.App) error {
 	// sign-in page.
 	v1.Post("/login/start", r.loginStart)
 	v1.Get("/login/callback", r.loginCallback)
+	// Which ways to sign in the deployment offers, for the sign-in page.
+	v1.Get("/sign-in-methods", r.signInMethods)
 
 	// Public verify (anonymous by design): anyone may check a signed document
 	// without an account. No session/CSRF — the anonymous-abuse gap is closed

@@ -611,7 +611,7 @@ func (r *router) signEnvelopeSlot(ctx *azugo.Context) {
 	// session). Best-effort — whatever is missing, the provider resolves
 	// itself; the request never fails over absent capabilities.
 	var signingCert, signIdentityID string
-	if sess != nil && sess.Capabilities != nil && req.Flow != flowWebEid {
+	if sess != nil && sess.Capabilities != nil && !inBrowserFlow(req.Flow) {
 		caps := sess.Capabilities
 		switch req.Flow {
 		case flowEseal:
@@ -636,10 +636,10 @@ func (r *router) signEnvelopeSlot(ctx *azugo.Context) {
 			authCert = caps.AuthCertificate
 		}
 	}
-	if req.Flow == flowWebEid && (req.SigningCertificate == "" || authCert == "") {
+	if inBrowserFlow(req.Flow) && (req.SigningCertificate == "" || authCert == "") {
 		ctx.Error(pkerrors.NewProblem("err:signing:invalidRequest",
 			pkerrors.WithStatus(fasthttp.StatusBadRequest),
-			pkerrors.WithDetail("a signing certificate is required for the webEid flow; the authentication certificate comes from your card login")))
+			pkerrors.WithDetail("a signing certificate is required for the "+req.Flow+" flow; the authentication certificate comes from your card login")))
 
 		return
 	}
@@ -664,7 +664,7 @@ func (r *router) signEnvelopeSlot(ctx *azugo.Context) {
 	// none. The targets are built from this service's own config — never from client
 	// input.
 	var postAuthRedirect, authErrorRedirect string
-	if req.Flow != flowWebEid {
+	if !inBrowserFlow(req.Flow) {
 		postAuthRedirect, authErrorRedirect = r.Config().SigningSlotReturnURLs(id, slot)
 	}
 

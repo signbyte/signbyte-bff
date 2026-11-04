@@ -17,6 +17,7 @@ package portalapi
 
 import (
 	"fmt"
+	"time"
 
 	"azugo.io/azugo"
 	"azugo.io/azugo/server"
@@ -34,6 +35,11 @@ import (
 	"github.com/signbyte/signbyte-bff/clients"
 	"github.com/signbyte/signbyte-bff/session"
 )
+
+// signInMethodsTTL is how long the Auth Service's answer to which ways of signing
+// in it offers is remembered: anonymous sign-in pages then cost it one read per
+// minute, not one per page load.
+const signInMethodsTTL = time.Minute
 
 // App is the Portal-API application container.
 type App struct {
@@ -84,6 +90,11 @@ type App struct {
 	// base URL + the outbound client are configured (the flows stay as the login
 	// permits them).
 	offered *clients.OfferedFlows
+
+	// signIn is which ways of signing in the Auth Service offers, read from its
+	// discovery document and remembered for signInMethodsTTL, so the sign-in page
+	// shows only those.
+	signIn *clients.OfferedFlows
 
 	// audit records user-facing GDPR personal-data access (e.g. a document
 	// download). Never nil after init — a no-op recorder when access-audit is not
@@ -205,6 +216,7 @@ func (a *App) init() error {
 		a.verify = clients.NewVerify(a.outboundClient, cfg.SignerBaseURL, cfg.SignerAudience)
 		a.offered = clients.NewOfferedFlows(clients.NewOffer(a.outboundClient, cfg.SignerBaseURL, cfg.SignerAudience), cfg.SignerFlowsTTL)
 	}
+	a.signIn = clients.NewOfferedFlows(clients.NewSignInMethods(a.HTTPClient(), cfg.InternalURL()), signInMethodsTTL)
 
 	// GDPR-audit: the user-facing personal-data access records the Portal-API makes
 	// as the human boundary (e.g. a document download). Wired only when access-audit
@@ -331,6 +343,10 @@ func (a *App) Audit() *audit.Recorder { return a.audit }
 // URL is configured).
 func (a *App) OfferedFlows() *clients.OfferedFlows { return a.offered }
 
+// SignInMethods returns which ways of signing in the Auth Service offers (never
+// nil after init).
+func (a *App) SignInMethods() *clients.OfferedFlows { return a.signIn }
+
 // VerifyAudit returns the verify abuse-evidence recorder (never nil after
 // init; a no-op when access-audit is not configured).
 func (a *App) VerifyAudit() *audit.VerifyRecorder { return a.verifyAudit }
@@ -362,6 +378,9 @@ func (a *App) SetAudit(rec *audit.Recorder) { a.audit = rec }
 
 // SetOfferedFlows injects what the signing service runs (test use only).
 func (a *App) SetOfferedFlows(o *clients.OfferedFlows) { a.offered = o }
+
+// SetSignInMethods injects which ways of signing in are offered (test use only).
+func (a *App) SetSignInMethods(o *clients.OfferedFlows) { a.signIn = o }
 
 // SetVerifyAudit injects the verify abuse-evidence recorder (test use only).
 func (a *App) SetVerifyAudit(rec *audit.VerifyRecorder) { a.verifyAudit = rec }

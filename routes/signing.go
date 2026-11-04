@@ -10,14 +10,22 @@ import (
 	"github.com/signbyte/signbyte-bff/routes/request"
 )
 
-// flowWebEid is the in-browser card flow: the SPA reads the card certificates and
-// signs the digests the orchestrator returns.
+// flowWebEid and flowLegacyEid are the in-browser card flows: the app reads the
+// card certificates and signs the digests the orchestrator returns, through Web
+// eID or through the provider's own browser plugin.
 const (
-	flowWebEid = "webEid"
+	flowWebEid    = "webEid"
+	flowLegacyEid = "legacyEid"
 	// flowEseal is the organisation e-seal flow's wire name across the signing
 	// pipeline (the seal rides eParaksts Mobile server-side signing).
 	flowEseal = "eparakstsMobileEseal"
 )
+
+// inBrowserFlow reports whether flow signs with the card in the person's browser
+// rather than through a redirect to the signing provider.
+func inBrowserFlow(flow string) bool {
+	return flow == flowWebEid || flow == flowLegacyEid
+}
 
 // maxStatusWait caps the status long-poll window the SPA can request, so one held
 // request can never tie up a worker indefinitely. The SPA loops short long-polls

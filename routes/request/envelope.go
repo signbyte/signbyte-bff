@@ -63,7 +63,7 @@ func (r *AddSlot) Validate(ctx *azugo.Context) error {
 // signing flow, and the signature format. The flow must be one the user's login
 // method permits — the orchestrator enforces that binding and rejects a mismatch.
 // SigningCertificate/AuthCertificate carry the card certificates for the in-browser
-// (webEid) flow; redirect flows omit them.
+// flows (webEid, legacyEid); redirect flows omit them.
 type SignSlot struct {
 	DocumentID         string `json:"documentId" validate:"required"`
 	Flow               string `json:"flow" validate:"required"`

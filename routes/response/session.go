@@ -8,6 +8,12 @@ type LoginStart struct {
 	State        string `json:"state"`
 }
 
+// SignInMethods is which ways of signing in the deployment offers, each by the
+// login method name the app sends back as `acr_values` to start it.
+type SignInMethods struct {
+	Methods []string `json:"methods"`
+}
+
 // Me is the logged-in user's identity, shaped for the app's flow chooser.
 type Me struct {
 	Sub            string   `json:"sub"`

@@ -303,6 +303,64 @@ func TestSignSlotWebEidThreadsCerts(t *testing.T) {
 	qt.Check(t, qt.Equals(sent.PostAuthRedirect, ""))
 }
 
+// TestSignSlotLegacyEidIsInBrowser proves the legacy plugin's card flow is signed
+// in the browser like Web eID: the app's signing certificate and the login's
+// authentication certificate go to the signing call, with no redirect return
+// URLs, and without its certificate the request is refused before any call.
+func TestSignSlotLegacyEidIsInBrowser(t *testing.T) {
+	app := api.TestApp(t)
+	qt.Assert(t, qt.IsNil(Init(app)))
+
+	doer := &routingDoer{routes: []routedResponse{
+		{method: http.MethodGet, contains: "/slots/s-1/eligible", status: 200, body: []byte(`{"eligible":true}`)},
+		{method: http.MethodPost, contains: "/api/v1/signings", status: 201, body: []byte(
+			`{"jobId":"job-1","state":"AWAITING_CLIENT_SIGNATURE","documents":[{"documentId":"doc-1","digest":"ZGln"}]}`)},
+		{method: http.MethodPost, contains: "/slots/s-1/job", status: 200, body: []byte(`{"id":"s-1","jobId":"job-1"}`)},
+	}}
+	app.SetEnvelope(clients.NewEnvelope(doer, "http://envelope:8080", "svc:envelope"))
+	app.SetSignflow(clients.NewSignflow(doer, "http://signflow:8080", "svc:signflow"))
+
+	const sid, csrf = "slot-legacy-sid", "slot-legacy-csrf"
+	err := app.Sessions().PutSession(context.Background(), sid, &session.Session{
+		Subject: "user-1", AccessToken: "tok", AccessExpiry: 1 << 62, CSRF: csrf,
+		Capabilities: &session.Capabilities{AuthCertificate: "MIIauthFromLogin", SigningCertificate: "MIIloginSigning"},
+	})
+	qt.Assert(t, qt.IsNil(err))
+
+	ta := azugo.NewTestApp(app.App)
+	ta.Start(t)
+	defer ta.Stop()
+	tc := ta.TestClient()
+
+	resp, err := tc.PostJSON("/api/portal/v1/envelopes/env-1/slots/s-1/sign",
+		map[string]any{"documentId": "doc-1", "flow": "legacyEid", "sigFormat": "XAdES"},
+		tc.WithCookie("portal_session", sid),
+		tc.WithHeader("X-CSRF-Token", csrf),
+	)
+	qt.Assert(t, qt.IsNil(err))
+	qt.Check(t, qt.Equals(resp.StatusCode(), fasthttp.StatusBadRequest))
+	fasthttp.ReleaseResponse(resp)
+	qt.Check(t, qt.Equals(len(doer.calls), 0))
+
+	resp, err = tc.PostJSON("/api/portal/v1/envelopes/env-1/slots/s-1/sign",
+		map[string]any{"documentId": "doc-1", "flow": "legacyEid", "sigFormat": "XAdES", "signingCertificate": "MIIsign"},
+		tc.WithCookie("portal_session", sid),
+		tc.WithHeader("X-CSRF-Token", csrf),
+	)
+	qt.Assert(t, qt.IsNil(err))
+	qt.Assert(t, qt.Equals(resp.StatusCode(), fasthttp.StatusCreated))
+	fasthttp.ReleaseResponse(resp)
+
+	// The card read in the browser signs, never a certificate captured at login.
+	var sent clients.BeginInput
+	qt.Assert(t, qt.IsNil(json.Unmarshal(doer.signBody, &sent)))
+	qt.Check(t, qt.Equals(sent.Flow, "legacyEid"))
+	qt.Check(t, qt.Equals(sent.SigningCertificate, "MIIsign"))
+	qt.Check(t, qt.Equals(sent.AuthCertificate, "MIIauthFromLogin"))
+	qt.Check(t, qt.Equals(sent.PostAuthRedirect, ""))
+	qt.Check(t, qt.Equals(sent.AuthErrorRedirect, ""))
+}
+
 // TestSignSlotWebEidRequiresCerts proves a per-slot in-browser signing that omits
 // the signing certificate is refused with 400 before any upstream call.
 func TestSignSlotWebEidRequiresCerts(t *testing.T) {

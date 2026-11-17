@@ -14,6 +14,11 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
+// multipartOverheadBytes is the room a multipart/form-data request gets beyond
+// its file cap, for the boundaries, part headers and the small text fields that
+// travel with the file.
+const multipartOverheadBytes = 1 << 20
+
 // uploadDocument forwards the user's upload to the document service on the user's
 // behalf, so the stored document is owned by the user.
 //
@@ -32,6 +37,10 @@ func (r *router) uploadDocument(ctx *azugo.Context) {
 	// The upload is multipart/form-data; read the file + the caller's fields and
 	// re-encode them for the document service (the framework parses multipart into
 	// the form, so the raw body is not forwardable verbatim).
+	// Hold the whole request to the upload cap plus the multipart framing, before
+	// the form is first read; the framework answers 413 over it.
+	ctx.SetMaxBodySize(int(r.Config().DocumentUploadMaxBytes + multipartOverheadBytes))
+
 	fh, err := ctx.Form.File("file")
 	if err != nil {
 		ctx.Error(err) // ParamRequiredError → 400 when the file part is absent
@@ -46,10 +55,22 @@ func (r *router) uploadDocument(ctx *azugo.Context) {
 	}
 
 	fields := map[string]string{}
-	if pc := ctx.Form.StringOptional("preservation_class"); pc != nil {
+	pc, err := ctx.Form.StringOptional("preservation_class")
+	if err != nil {
+		ctx.Error(err)
+
+		return
+	}
+	if pc != nil {
 		fields["preservation_class"] = *pc
 	}
-	if m := ctx.Form.StringOptional("mime"); m != nil {
+	m, err := ctx.Form.StringOptional("mime")
+	if err != nil {
+		ctx.Error(err)
+
+		return
+	}
+	if m != nil {
 		fields["mime"] = *m
 	}
 

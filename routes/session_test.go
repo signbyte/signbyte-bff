@@ -1,6 +1,7 @@
 package routes
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -65,6 +66,19 @@ func TestRefreshWithoutSessionUnauthorized(t *testing.T) {
 	qt.Assert(t, qt.IsNil(err))
 	qt.Assert(t, qt.Equals(resp.StatusCode(), fasthttp.StatusUnauthorized))
 	fasthttp.ReleaseResponse(resp)
+}
+
+// A login-start body over the framework's 4 MiB default answers 413.
+func TestLoginStartBodyOverDefaultLimitIs413(t *testing.T) {
+	app := testApp(t)
+	app.Start(t)
+	defer app.Stop()
+
+	resp, err := app.TestClient().Post("/api/portal/v1/login/start", bytes.Repeat([]byte("A"), 5<<20))
+	qt.Assert(t, qt.IsNil(err))
+	defer fasthttp.ReleaseResponse(resp)
+	qt.Assert(t, qt.Equals(resp.StatusCode(), fasthttp.StatusRequestEntityTooLarge))
+	qt.Check(t, qt.IsTrue(strings.Contains(string(resp.Header.ContentType()), "problem+json")))
 }
 
 // testBinding is a well-formed binding value a test browser holds, so a test

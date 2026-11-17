@@ -109,6 +109,9 @@ type Configuration struct {
 	// VerifyMaxBytes caps the uploaded verify file; larger uploads are rejected
 	// before any bytes are forwarded upstream.
 	VerifyMaxBytes int64 `mapstructure:"verify_max_bytes" validate:"gt=0"`
+	// DocumentUploadMaxBytes caps a document upload through the portal; a larger
+	// request is refused with 413 before it is read.
+	DocumentUploadMaxBytes int64 `mapstructure:"document_upload_max_bytes" validate:"gt=0"`
 	// VerifyRatePerMinute + VerifyRateBurst shape the per-client-IP rate limit
 	// on the public verify route; VerifyConcurrentPerIP caps in-flight verify
 	// requests per client IP (a verification legitimately runs tens of
@@ -205,6 +208,8 @@ func (c *Configuration) Bind(_ string, v *viper.Viper) {
 	v.SetDefault("signer_flows_ttl", time.Minute)
 	_ = v.BindEnv("signer_flows_ttl", "SIGNER_FLOWS_TTL")
 	_ = v.BindEnv("verify_max_bytes", "VERIFY_MAX_BYTES")
+	v.SetDefault("document_upload_max_bytes", int64(25<<20))
+	_ = v.BindEnv("document_upload_max_bytes", "DOCUMENT_UPLOAD_MAX_BYTES")
 	_ = v.BindEnv("verify_rate_per_minute", "VERIFY_RATE_PER_MINUTE")
 	_ = v.BindEnv("verify_rate_burst", "VERIFY_RATE_BURST")
 	_ = v.BindEnv("verify_concurrent_per_ip", "VERIFY_CONCURRENT_PER_IP")

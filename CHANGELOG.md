@@ -3,6 +3,20 @@
 Notable changes to this service, newest first, per release. This file is written for whoever
 runs the service or integrates against it.
 
+## v0.6.0
+
+### Changed
+
+- **Runs on Go 1.27.4 and Azugo v0.50.2.**
+- **Request bodies are held to the framework's limit.** A body over it answers `413` as a problem document. The
+  default is 4 MiB; `SERVER_MAX_REQUEST_BODY_SIZE` overrides it for the whole service.
+- **The two upload routes set their own limit.** `POST /api/portal/v1/verify` takes a request of up to
+  `VERIFY_MAX_BYTES` plus 1 MiB for the multipart framing; `POST /api/portal/v1/documents` takes up to the new
+  `DOCUMENT_UPLOAD_MAX_BYTES` (default 25 MiB, the same as the verify default) plus the same 1 MiB. The existing
+  `VERIFY_MAX_BYTES` keeps its default and its meaning. A verify request over its limit still answers
+  `413 err:verify:fileTooLarge`.
+- **A malformed multipart upload answers `400`.**
+
 ## v0.5.0
 
 ### Added

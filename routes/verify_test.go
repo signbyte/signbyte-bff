@@ -258,6 +258,56 @@ func TestVerifyTooLargeRejectedBeforeUpstream(t *testing.T) {
 	qt.Check(t, qt.Equals(stub.calls, 0))
 }
 
+// A file above the framework's 4 MiB default but under the configured cap goes
+// through; the route raises its own body limit from VERIFY_MAX_BYTES.
+func TestVerifyAboveDefaultBodyLimitPasses(t *testing.T) {
+	stub := &verifyStubDoer{status: 200, body: []byte(sampleV2Report)}
+	t.Setenv("VERIFY_MAX_BYTES", "6291456") // 6 MiB
+	app := verifyTestApp(t, stub, nil)
+	app.Start(t)
+	defer app.Stop()
+
+	data := append(signedSamplePDF(), bytes.Repeat([]byte("\n"), 5<<20)...)
+	resp := postVerify(t, app, "signed.pdf", data)
+	defer fasthttp.ReleaseResponse(resp)
+	qt.Assert(t, qt.Equals(resp.StatusCode(), fasthttp.StatusOK))
+	qt.Check(t, qt.Equals(stub.calls, 1))
+}
+
+// A file just over the cap, and one past the body limit (cap plus the multipart
+// room), both answer the route's own too-large problem before anything is
+// forwarded.
+func TestVerifyBodyOverLimitIsFileTooLarge(t *testing.T) {
+	for _, extra := range []int{1 << 20, 2 << 20, 8 << 20} {
+		stub := &verifyStubDoer{status: 200}
+		t.Setenv("VERIFY_MAX_BYTES", "6291456") // 6 MiB
+		app := verifyTestApp(t, stub, nil)
+		app.Start(t)
+
+		resp := postVerify(t, app, "big.pdf", bytes.Repeat([]byte("A"), 6<<20+extra))
+		qt.Check(t, qt.Equals(resp.StatusCode(), fasthttp.StatusRequestEntityTooLarge))
+		qt.Check(t, qt.IsTrue(strings.Contains(string(resp.Header.ContentType()), "problem+json")))
+		qt.Check(t, qt.IsTrue(strings.Contains(string(resp.Body()), "err:verify:fileTooLarge")))
+		qt.Check(t, qt.Equals(stub.calls, 0))
+		fasthttp.ReleaseResponse(resp)
+		app.Stop()
+	}
+}
+
+// A multipart body that does not parse answers 400.
+func TestVerifyMalformedMultipartIs400(t *testing.T) {
+	app := verifyTestApp(t, &verifyStubDoer{status: 200}, nil)
+	app.Start(t)
+	defer app.Stop()
+
+	tc := app.TestClient()
+	resp, err := tc.Post("/api/portal/v1/verify", []byte("--nope\r\ngarbage"),
+		tc.WithHeader("Content-Type", "multipart/form-data; boundary=wanted"))
+	qt.Assert(t, qt.IsNil(err))
+	defer fasthttp.ReleaseResponse(resp)
+	qt.Assert(t, qt.Equals(resp.StatusCode(), fasthttp.StatusBadRequest))
+}
+
 func TestVerifyMissingFilePart(t *testing.T) {
 	app := verifyTestApp(t, &verifyStubDoer{status: 200}, nil)
 	app.Start(t)

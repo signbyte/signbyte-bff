@@ -377,6 +377,68 @@ func TestUploadDocumentThroughBFF(t *testing.T) {
 	qt.Assert(t, qt.IsTrue(strings.Contains(string(doer.lastBody), "application/pdf")))
 }
 
+// uploadAt posts a multipart upload with the given body to the upload route of a
+// test app whose upload cap is 6 MiB, and returns the response and the stub.
+func uploadAt(t *testing.T, body []byte, contentType string) (*fasthttp.Response, *stubDoer) {
+	t.Helper()
+
+	t.Setenv("DOCUMENT_UPLOAD_MAX_BYTES", "6291456") // 6 MiB
+	app := api.TestApp(t)
+	qt.Assert(t, qt.IsNil(Init(app)))
+	doer := &stubDoer{status: fasthttp.StatusCreated, body: []byte(
+		`{"id":"doc-1","filename":"big.bin","mime":"application/pdf","contentHash":"abc","size":1}`)}
+	app.SetDocuments(clients.NewDocuments(doer, "http://document:8080", "svc:document"))
+
+	const sid, csrf = "uploadsize-sid", "uploadsize-csrf"
+	err := app.Sessions().PutSession(context.Background(), sid, &session.Session{
+		Subject: "user-1", AccessToken: "tok", AccessExpiry: 1 << 62, CSRF: csrf,
+	})
+	qt.Assert(t, qt.IsNil(err))
+
+	ta := azugo.NewTestApp(app.App)
+	ta.Start(t)
+	t.Cleanup(ta.Stop)
+
+	tc := ta.TestClient()
+	resp, err := tc.Post("/api/portal/v1/documents", body,
+		tc.WithCookie("portal_session", sid),
+		tc.WithHeader("X-CSRF-Token", csrf),
+		tc.WithHeader("Content-Type", contentType),
+	)
+	qt.Assert(t, qt.IsNil(err))
+
+	return resp, doer
+}
+
+// An upload above the framework's 4 MiB default but under the configured cap
+// passes: the route raises its own body limit from the setting.
+func TestUploadDocumentAboveDefaultBodyLimitPasses(t *testing.T) {
+	body, contentType := buildMultipart(t, "big.bin", bytes.Repeat([]byte("A"), 5<<20), nil)
+	resp, doer := uploadAt(t, body, contentType)
+	defer fasthttp.ReleaseResponse(resp)
+	qt.Assert(t, qt.Equals(resp.StatusCode(), fasthttp.StatusCreated))
+	qt.Check(t, qt.IsTrue(len(doer.lastBody) > 5<<20))
+}
+
+// An upload beyond the cap plus the multipart framing answers 413 as a problem
+// document and nothing is forwarded.
+func TestUploadDocumentOverBodyLimitIs413(t *testing.T) {
+	body, contentType := buildMultipart(t, "big.bin", bytes.Repeat([]byte("A"), 8<<20), nil)
+	resp, doer := uploadAt(t, body, contentType)
+	defer fasthttp.ReleaseResponse(resp)
+	qt.Assert(t, qt.Equals(resp.StatusCode(), fasthttp.StatusRequestEntityTooLarge))
+	qt.Check(t, qt.IsTrue(strings.Contains(string(resp.Header.ContentType()), "problem+json")))
+	qt.Check(t, qt.IsNil(doer.lastBody))
+}
+
+// A multipart body that does not parse answers 400.
+func TestUploadDocumentMalformedMultipartIs400(t *testing.T) {
+	resp, doer := uploadAt(t, []byte("--nope\r\ngarbage"), "multipart/form-data; boundary=wanted")
+	defer fasthttp.ReleaseResponse(resp)
+	qt.Assert(t, qt.Equals(resp.StatusCode(), fasthttp.StatusBadRequest))
+	qt.Check(t, qt.IsNil(doer.lastBody))
+}
+
 // TestUploadDocumentMissingFileRejected proves an upload without a "file" part is
 // refused with 400 before any upstream call.
 func TestUploadDocumentMissingFileRejected(t *testing.T) {

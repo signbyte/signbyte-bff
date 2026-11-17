@@ -21,6 +21,15 @@ import (
 	"github.com/signbyte/signbyte-bff/audit"
 )
 
+// verifyFileTooLarge answers the verify route's own too-large problem, for a
+// file over the cap and for a request the body limit refused.
+func verifyFileTooLarge(ctx *azugo.Context) {
+	ctx.Error(pkerrors.NewProblem("err:verify:fileTooLarge",
+		pkerrors.WithStatus(fasthttp.StatusRequestEntityTooLarge),
+		pkerrors.WithTitle("File too large"),
+		pkerrors.WithPublicDetail("the file exceeds the size limit")))
+}
+
 // verifyDocument — POST /api/portal/v1/verify (multipart: file). PUBLIC — the
 // one anonymous endpoint besides login: anyone may check a signed document
 // without an account. The flow is a stateless proxy: the file is admission-
@@ -49,7 +58,20 @@ func (r *router) verifyDocument(ctx *azugo.Context) {
 	}
 	defer r.verifyGate.release(ip)
 
-	files := ctx.Form.Files("file")
+	// Hold the whole request to the file cap plus the multipart framing, before
+	// the form is first read; the framework answers 413 over it.
+	ctx.SetMaxBodySize(int(r.Config().VerifyMaxBytes + multipartOverheadBytes))
+
+	files, err := ctx.Form.Files("file")
+	if err != nil {
+		var tooLarge azugo.RequestEntityTooLargeError
+		if errors.As(err, &tooLarge) {
+			verifyFileTooLarge(ctx)
+			return
+		}
+		ctx.Error(err)
+		return
+	}
 	if len(files) != 1 {
 		ctx.Error(pkerrors.NewProblem("err:verify:invalidRequest",
 			pkerrors.WithStatus(fasthttp.StatusBadRequest),
@@ -60,10 +82,7 @@ func (r *router) verifyDocument(ctx *azugo.Context) {
 
 	maxBytes := r.Config().VerifyMaxBytes
 	if fh.Size > maxBytes {
-		ctx.Error(pkerrors.NewProblem("err:verify:fileTooLarge",
-			pkerrors.WithStatus(fasthttp.StatusRequestEntityTooLarge),
-			pkerrors.WithTitle("File too large"),
-			pkerrors.WithPublicDetail("the file exceeds the size limit")))
+		verifyFileTooLarge(ctx)
 		return
 	}
 

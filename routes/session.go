@@ -39,7 +39,13 @@ const csrfCookieName = "portal_csrf"
 // @route /api/portal/v1/login/start [post].
 func (r *router) loginStart(ctx *azugo.Context) {
 	var req request.LoginStart
-	if len(ctx.Body.Bytes()) > 0 {
+	raw, err := ctx.Body.Bytes()
+	if err != nil {
+		ctx.Error(err)
+
+		return
+	}
+	if len(raw) > 0 {
 		if err := ctx.Body.JSON(&req); err != nil {
 			ctx.Error(err)
 

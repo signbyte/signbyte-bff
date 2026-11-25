@@ -8,7 +8,7 @@ require (
 	github.com/gmb-lib/go-authbyte v0.46.0
 	github.com/gmb-lib/go-docgate v1.0.7
 	github.com/gmb-lib/go-gdpr-audit v1.2.0
-	github.com/gmb-lib/go-platform-kit v1.13.0
+	github.com/gmb-lib/go-platform-kit v1.14.0
 	github.com/gmb-lib/go-sec-events v1.3.0
 	github.com/gmb-lib/go-validation-answer v1.1.5
 	github.com/go-quicktest/qt v1.102.0

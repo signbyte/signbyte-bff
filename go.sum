@@ -42,8 +42,8 @@ github.com/gmb-lib/go-docgate v1.0.7 h1:g1guenaRQ3YOjotg4TYF9A/dA5tUN8p/B7ZmGfPJ
 github.com/gmb-lib/go-docgate v1.0.7/go.mod h1:Oqe6ltRHGjF7TDzohMMMKubwcNY4ufh5ndOAQfro1eA=
 github.com/gmb-lib/go-gdpr-audit v1.2.0 h1:Rt5LmhxOxIJZf5Nz+Va1sHumwzLB3R1fiRmlrmDmkKI=
 github.com/gmb-lib/go-gdpr-audit v1.2.0/go.mod h1:KrQIKXTZ/LBw935XlKNATAM8jWjKtuBp0O6od200WPo=
-github.com/gmb-lib/go-platform-kit v1.13.0 h1:DeoUXL4Eq309u9Ufhx9PleW/qMmkR8OXQoUHRcuAkYo=
-github.com/gmb-lib/go-platform-kit v1.13.0/go.mod h1:FtcG128HmBeFcaO/+SSzxU9ZpkB52rhZFLJIYH2R9CI=
+github.com/gmb-lib/go-platform-kit v1.14.0 h1:TJK1eypmEddqLaif7zxlecm9QiA7nu4sc0gf+ICtblg=
+github.com/gmb-lib/go-platform-kit v1.14.0/go.mod h1:wSsrYSP4c0J5KxhCf+fREG12Lux/kyOLTAJdh0nkH1U=
 github.com/gmb-lib/go-sec-events v1.3.0 h1:ttnPVEHo54994amFuA9ppasfO54GMOiuUWKTfPy3+Vc=
 github.com/gmb-lib/go-sec-events v1.3.0/go.mod h1:XS5KG84UYPrs/JU+ejo/E0mA2Zw1iqlQ0g+NQYd4+y0=
 github.com/gmb-lib/go-validation-answer v1.1.5 h1:h0HyHWeKnFBI/DPm3UBJDJW7m84AY/UNI4/b0oq/J/0=

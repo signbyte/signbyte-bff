@@ -3,6 +3,15 @@
 Notable changes to this service, newest first, per release. This file is written for whoever
 runs the service or integrates against it.
 
+## v0.6.1
+
+### Fixed
+
+- **Trace spans no longer carry a cache key or a rate-limit key.** The service takes go-platform-kit v1.14.0:
+  its cache spans keep their names, attributes and counts without the key (a session id or a one-time code
+  could be written into the trace store before), and its rate-limit spans are named by the operation alone,
+  never by a client's address or a person's subject. Nothing to configure.
+
 ## v0.6.0
 
 ### Changed
